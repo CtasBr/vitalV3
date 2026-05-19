@@ -48,15 +48,16 @@ def build_raw(pkt_type: int, seq: int, payload: bytes = b"") -> bytes:
 
 
 def cobs_encode(data: bytes) -> bytes:
+    """COBS encode; input may contain 0x00 (skipped, not copied to output)."""
     out = bytearray()
-    read = 0
-    while read < len(data):
+    i = 0
+    while i < len(data):
         block_start = len(out)
-        out.append(0)
+        out.append(0)  # code placeholder
         code = 1
-        while read < len(data) and data[read] != 0:
-            out.append(data[read])
-            read += 1
+        while i < len(data) and data[i] != 0:
+            out.append(data[i])
+            i += 1
             code += 1
             if code == 0xFF:
                 out[block_start] = code
@@ -64,6 +65,8 @@ def cobs_encode(data: bytes) -> bytes:
                 out.append(0)
                 code = 1
         out[block_start] = code
+        if i < len(data) and data[i] == 0:
+            i += 1  # COBS: zero in raw is delimiter, do not emit
     out.append(0)
     return bytes(out)
 
@@ -108,7 +111,9 @@ def read_cobs_frame(ser: serial.Serial, timeout: float = 2.0) -> bytes:
                 return cobs_decode(bytes(buf))
             continue
         buf.extend(b)
-    raise TimeoutError("no COBS frame")
+    raise TimeoutError(
+        "no COBS frame (timeout). Check: M4 firmware flashed? screen closed? correct port?"
+    )
 
 
 def main() -> None:
@@ -121,9 +126,13 @@ def main() -> None:
     if not port:
         ports = sorted(glob.glob("/dev/cu.usbmodem*"))
         if not ports:
-            print("No usbmodem port", file=sys.stderr)
+            print("No /dev/cu.usbmodem* found. Plug NUCLEO USB (ST-Link).", file=sys.stderr)
+            print("Or: python3 tools/uart_pkt_ping.py /dev/cu.usbmodemXXXX", file=sys.stderr)
             raise SystemExit(1)
-        port = ports[0]
+        if len(ports) > 1:
+            print("Ports:", ", ".join(ports))
+        port = ports[-1]  # often the active ST-Link VCP
+    print(f"Using port: {port} @ {args.baud}", flush=True)
 
     with serial.Serial(port, args.baud, timeout=0.5) as ser:
         time.sleep(0.2)
@@ -131,7 +140,8 @@ def main() -> None:
         raw = build_raw(PKT_PING, seq=42)
         wire = cobs_encode(raw)
         ser.write(wire)
-        print(f"Sent PKT_PING seq=42 ({len(wire)} COBS bytes)")
+        ser.flush()
+        print(f"Sent PKT_PING seq=42 ({len(wire)} COBS bytes)", flush=True)
         reply = read_cobs_frame(ser)
         ptype, seq = parse_raw(reply)
         if ptype != PKT_PONG or seq != 42:
