@@ -1,0 +1,185 @@
+# vitalV3 — состояние проекта (контекст для разработки)
+
+> **Обновлять этот файл** при завершении каждого milestone.  
+> Репозиторий: https://github.com/CtasBr/vitalV3
+
+---
+
+## Что строим
+
+**Робот-манипулятор 4 оси** (шаговые A–D + кинематика плеча 250 мм).
+
+| Слой | Где | Технологии |
+|------|-----|------------|
+| **Motion MCU** | STM32F429 NUCLEO / кастомная плата | FreeRTOS, TIM1–4 STEP, бинарный UART |
+| **Всё остальное** | Mac (iMac M4) | Python `pyrobot/`, ZMQ, msgpack, Pydantic `proto/` |
+
+**Принцип:** STM32 = только моторы + safety. Кинематика, vision, AI, UI — на Mac.
+
+**Старый код** (`vitalSoft`, `vitalDriver` текстовый UART) **удалён**. Смысл сохранён в корневом `README.md`.
+
+---
+
+## Структура репозитория
+
+```
+vitalV3/
+├── docs/PROJECT_STATE.md      ← этот файл
+├── config/robot.yaml          ← единый конфиг (порты, ZMQ, кинематика)
+├── proto/                     ← Pydantic: MotionCommand, MotionState, …
+├── pyrobot/                   ← Python: hal/, kinematics/, … (этап 0 сделан)
+├── tools/                     ← uart_ping.py, uart_step.py, uart_pkt_ping.py
+├── firmware/robot.ioc           ← эталон пинов CubeMX
+├── vital_motion/              ← CubeIDE проект прошивки (активная разработка)
+└── README.md                  ← legacy-функции, кинематика, пины
+```
+
+---
+
+## Пины STM32 (не менять без перепайки)
+
+| Ось | STEP | DIR | TIM |
+|-----|------|-----|-----|
+| A | PE9 | PF0 | TIM1 |
+| B | PA0 | PF1 | TIM2 |
+| C | PA6 | PF2 | TIM3 |
+| D | PD12 | PF3 | TIM4 |
+
+| UART | Пины | Использование |
+|------|------|----------------|
+| **USART3** | PD8/PD9 | **NUCLEO: ST-Link USB** — сейчас motion + лог (один кабель) |
+| **USART2** | PD5/PA3 | Кастомная плата (переключатель `board_config.h`) |
+
+`vital_motion/Core/Inc/board_config.h`: `MOTION_LINK_USE_USART3 1`
+
+---
+
+## Этапы и статус
+
+| Этап | Описание | Статус |
+|------|----------|--------|
+| **0** | Монорепо, proto, yaml, FakeMotionBus, ZMQ | ✅ |
+| **1** | Прошивка motion-core | 🔄 в `vital_motion/` |
+| **1-M0** | LED LD1 (PB0) | ✅ |
+| **1-M1** | printf / USART3 | ✅ |
+| **1-M2** | UART echo, `PING`→`PONG` | ✅ |
+| **1-M3** | Ось A: `STEP n [arr]`, TIM1 | ✅ **проверено пользователем** |
+| **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ код, нужна прошивка |
+| **1-M5** | 4 оси, segment buffer | ⏳ |
+| **1-M6** | Heartbeat, ESTOP, soft limits | ⏳ |
+| **2** | Python motion_bridge + SHM camera | ⏳ |
+| **3–7** | Vision, kinematics, skills, AI | ⏳ |
+
+---
+
+## Прошивка `vital_motion/` — файлы
+
+| Файл | Роль |
+|------|------|
+| `main.c` | init, FreeRTOS tasks, `HAL_TIM_PeriodElapsedCallback` → TIM7 tick + TIM1 motor |
+| `comm_uart.c` | Текстовые команды: `PING`, `STEP` |
+| `motor.c` | `motor_axis_a_move(steps, tim_arr)` — TIM1 PWM |
+| `board_config.h` | USART3 vs USART2 |
+| `protocol.c` | M4: COBS, CRC16, `PKT_PING`→`PKT_PONG` |
+| `BRINGUP.md` | Пошаговая инструкция |
+
+**CubeIDE:** новые `.c` в `Core/Src` нужно **перетащить в Project Explorer** (не появляются автоматически). `Debug/` в `.gitignore`.
+
+**Задачи FreeRTOS:**
+
+- `defaultTask` — LED 500 ms
+- `move` — `comm_uart_poll_loop()` (UART RX/TX)
+
+---
+
+## Текстовый протокол (M2–M3, до полного M4)
+
+Через USART3 @ 115200, строки `\n`:
+
+| Команда | Ответ |
+|---------|--------|
+| `PING` | `PONG` |
+| `STEP 50` | `RUN STEP...` → `OK STEP` |
+| `STEP -100 4000` | шаги + TIM1 ARR (скорость) |
+
+Mac: `tools/uart_ping.py`, `tools/uart_step.py`
+
+---
+
+## Бинарный протокол (M4+, целевой)
+
+См. `vital_motion/docs/protocol.md`.
+
+- Fixed payload **60 B** + COBS frame
+- CRC16-CCITT, `seq`, типы пакетов
+- Смысл полей согласован с `proto/motion.py` (Mac — msgpack, MCU — packed struct)
+
+**Не смешивать** на одном UART долгий printf и бинарный поток 100 Hz.
+
+---
+
+## Python (Mac) — этап 0
+
+- `config/robot.yaml`: `motion.backend: fake`, порт `usbmodem` для NUCLEO
+- `pyrobot/hal/fake_motion.py` + `robot-fake-motion` daemon
+- `pytest` — 8 тестов
+
+**Следующий Python-шаг:** `stm32_motion_bridge` после M4–M5 на MCU.
+
+---
+
+## Кинематика (из legacy, для `pyrobot/kinematics/`)
+
+- `la = lb = 250` mm
+- Cartesian → углы: `l`, `b = acos(1-l²/(2la·lb))`, `a`, `c = atan(y/x)`
+- `deg_per_step = 360/(200·16·6)`
+- Home: (250, 0, 250), углы 90/90/0
+
+---
+
+## Решения и антипаттерны
+
+| Делаем | Не делаем |
+|--------|-----------|
+| ZMQ + Pydantic на Mac | ROS2 |
+| SHM для камер (позже) | pickle + JPEG по socket |
+| Один `robot.yaml` | хардкод `/dev/cu.*` |
+| Skills вместо G-code API | G-code как язык поведения |
+| USART3 на NUCLEO (1 USB) | обязательно 2 USB на столе |
+
+---
+
+## Команды для проверки
+
+```bash
+# Python
+cd vitalV3 && source .venv/bin/activate
+pytest -q
+uv run robot-fake-motion
+
+# MCU (после прошивки)
+screen /dev/cu.usbmodem* 115200
+python3 tools/uart_ping.py
+python3 tools/uart_step.py 20
+python3 tools/uart_pkt_ping.py   # M4
+```
+
+---
+
+## Git
+
+- Ветка: `main`
+- Коммиты: этап 0 (`e32b896`), vital_motion M2–M3 (`bafa0e3`), M4 — следующий
+- **Пушить** после каждого завершённого milestone
+
+---
+
+## Следующая работа (M4)
+
+1. `protocol.c/h` — CRC, COBS, `PKT_PING` / `PKT_PONG`
+2. `comm_uart.c` — режим: строка **или** бинарный кадр (magic `0x56`)
+3. `tools/uart_pkt_ping.py`
+4. Документ `vital_motion/docs/protocol.md`
+5. Не ломать текстовый `STEP` до M5
+
+После M4–M6: `pyrobot/hal/stm32_bridge.py` + переключить `motion.backend: stm32`.

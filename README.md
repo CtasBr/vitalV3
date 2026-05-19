@@ -72,6 +72,8 @@ robot/   (корень newVit)
 
 Python: **uv**, **ruff**, **mypy strict**, **pre-commit**.
 
+**Состояние разработки и контекст для агента:** [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md)
+
 ### Быстрый старт (этап 0)
 
 ```bash

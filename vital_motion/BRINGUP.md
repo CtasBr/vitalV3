@@ -161,8 +161,20 @@ TIM prescaler/period: TIM1 167/10000, TIM2–4 83/10000 — как было.
 
 Если крутится не туда — поменяй знак или инверсию DIR в `motor.c`.
 
-## После M3
+## M4 — бинарный PKT_PING / PKT_PONG
 
-1. M4 — бинарный протокол (COBS)  
-2. M5 — 4 оси  
+1. Добавь `protocol.c` в проект (drag → `Core/Src`)
+2. Build → Flash
+3. **Закрой screen** — бинарный тест не совместим с echo в терминале
+4. ```bash
+   python3 tools/uart_pkt_ping.py
+   ```
+   Ожидаешь: `OK: PKT_PONG seq=42`
+
+Текст `PING` / `STEP` по-прежнему работают. Текст `BPING` — отправить бинарный PONG вручную.
+
+## После M4
+
+1. M5 — 4 оси + `PKT_MOVE_SEGMENT`  
+2. M6 — heartbeat / ESTOP  
 3. Кастомная плата: `MOTION_LINK_USE_USART3 0` → USART2
