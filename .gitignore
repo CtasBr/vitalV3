@@ -19,6 +19,10 @@ htmlcov/
 # IDE
 .idea/
 .vscode/
+.metadata/
+vital_motion/Debug/
+vital_motion/Release/
+vital_motion/.settings/
 *.swp
 *.swo
 

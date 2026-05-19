@@ -15,7 +15,8 @@ zmq:
 
 motion:
   backend: "fake"  # fake | stm32 | legacy
-  port: "/dev/cu.usbserial-2120"
+  # NUCLEO + один USB ST-Link: /dev/cu.usbmodem* (USART3). Кастомная плата: usbserial → USART2
+  port: "/dev/cu.usbmodem14103"
   baudrate: 115200
   num_axes: 4
   telemetry_hz: 100
