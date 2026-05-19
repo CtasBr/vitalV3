@@ -1,0 +1,65 @@
+schema_version: 1
+
+zmq:
+  ipc_dir: "/tmp/robot"
+  topics:
+    motion_cmd: "motion.cmd"
+    motion_state: "motion.state"
+    encoders_state: "encoders.state"
+    camera_rgb: "camera.rgb"
+    tof_depth: "tof.depth"
+    vision_detections: "vision.detections"
+    world_objects: "world.objects"
+    skills_cmd: "skills.cmd"
+    heartbeat: "heartbeat"
+
+motion:
+  backend: "fake"  # fake | stm32 | legacy
+  port: "/dev/cu.usbserial-2120"
+  baudrate: 115200
+  num_axes: 4
+  telemetry_hz: 100
+  heartbeat_hz: 10
+  watchdog_ms: 200
+
+encoders:
+  port_a: "/dev/cu.usbserial-3140"
+  port_b: "/dev/cu.usbserial-3130"
+  baudrate: 9600
+
+tof:
+  port: "/dev/cu.usbserial-202206_DD98130"
+  baudrate: 115200
+  quantize: 2
+  delta_mm: 38
+
+camera:
+  index: 0
+  width: 1920
+  height: 1080
+
+kinematics:
+  link_length_mm: 250.0
+  home:
+    x: 250.0
+    y: 0.0
+    z: 250.0
+  deg_per_step: 0.01875  # 360 / (200 * 16 * 6)
+
+limits:
+  x: [0.0, 500.0]
+  y: [-200.0, 200.0]
+  z: [-100.0, 400.0]
+
+toolheads:
+  angle_between_deg: 45.0
+  mid_x: [354.0, 340.0, 320.0]
+  table_len_mm: 200.0
+
+simulation:
+  fake_motion_hz: 100
+  joint_limits_deg:
+    a: [-10.0, 170.0]
+    b: [10.0, 170.0]
+    c: [-180.0, 180.0]
+    d: [-360.0, 360.0]
