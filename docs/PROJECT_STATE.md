@@ -65,7 +65,7 @@ vitalV3/
 | **1-M2** | UART echo, `PING`→`PONG` | ✅ |
 | **1-M3** | Ось A: `STEP n [arr]`, TIM1 | ✅ **проверено пользователем** |
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
-| **1-M5** | M5-min: PKT_MOVE_SEGMENT для оси A + SEGMENT_DONE | ✅ код, нужна прошивка |
+| **1-M5** | M5-min: PKT_MOVE_SEGMENT для оси A + SEGMENT_DONE | 🔄 код; усилили ACK (x2), нужна проверка |
 | **1-M6** | Heartbeat, ESTOP, soft limits | ⏳ |
 | **2** | Python motion_bridge + SHM camera | ⏳ |
 | **3–7** | Vision, kinematics, skills, AI | ⏳ |

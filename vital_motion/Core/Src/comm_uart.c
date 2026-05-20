@@ -64,6 +64,9 @@ static void comm_uart_send_segment_done(uint16_t seq, int32_t done_steps)
   {
     return;
   }
+  /* USB-CDC/ST-Link can occasionally drop a byte; duplicate ACK improves robustness. */
+  comm_uart_send_raw_cobs(&pkt);
+  osDelay(2);
   comm_uart_send_raw_cobs(&pkt);
 }
 
