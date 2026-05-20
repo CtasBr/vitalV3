@@ -30,9 +30,12 @@ motion:
     d: [-4800, 4800]
 
 encoders:
-  port_a: "/dev/cu.usbserial-3140"
-  port_b: "/dev/cu.usbserial-3130"
+  port_a: "/dev/cu.usbserial-2130"
+  port_b: "/dev/cu.usbserial-2110"
   baudrate: 9600
+  poll_hz: 20
+  home_deg: [90.0, 90.0, 0.0, 0.0]
+  offsets_file: "config/encoders_offsets.json"
 
 tof:
   port: "/dev/cu.usbserial-202206_DD98130"

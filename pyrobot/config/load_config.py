@@ -52,6 +52,9 @@ class EncodersConfig(BaseModel):
     port_a: str
     port_b: str
     baudrate: int = 9600
+    poll_hz: int = 20
+    home_deg: list[float] = Field(default_factory=lambda: [90.0, 90.0, 0.0, 0.0], min_length=4, max_length=4)
+    offsets_file: str = "config/encoders_offsets.json"
 
 
 class TofConfig(BaseModel):
@@ -116,6 +119,9 @@ class RobotConfig(BaseModel):
 
     def motion_cmd_uri(self) -> str:
         return self.topic_uri(self.zmq.topics.motion_cmd)
+
+    def encoders_state_uri(self) -> str:
+        return self.topic_uri(self.zmq.topics.encoders_state)
 
 
 def load_config(path: Path | str | None = None) -> RobotConfig:

@@ -24,6 +24,7 @@ dev = [
 
 [project.scripts]
 robot-fake-motion = "pyrobot.hal.fake_motion_daemon:main"
+robot-encoder-daemon = "pyrobot.hal.encoder_daemon:main"
 robot-motion-cli = "pyrobot.hal.motion_cli:main"
 
 [build-system]

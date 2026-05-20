@@ -34,6 +34,7 @@ Thumbs.db
 /tmp/robot/
 *.mcap
 imgs/
+config/encoders_offsets.json
 
 # Firmware build
 firmware/**/Debug/

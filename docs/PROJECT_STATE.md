@@ -67,7 +67,7 @@ vitalV3/
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
 | **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ |
 | **1-M6** | Heartbeat + ESTOP + fault bit in telemetry (soft-limits позже) | 🔄 код; нужна проверка |
-| **2** | Python stm32 bridge + SHM camera | 🔄 started (`Stm32MotionBus` + `robot-motion-cli`) |
+| **2** | Python stm32 bridge + encoders ZMQ | 🔄 (`Stm32MotionBus`, `robot-motion-cli`, `robot-encoder-daemon`) |
 | **3–7** | Vision, kinematics, skills, AI | ⏳ |
 
 ---
@@ -197,3 +197,20 @@ python3 tools/uart_pkt_estop.py       # M6 estop -> fault
 - Добавлен `PKT_RESET_FAULT` (`0x32`) host→mcu; MCU отвечает `PKT_FAULT(0)` при успешном сбросе.
 - Добавлены firmware soft-limits по каждой оси: значения берутся из `config/robot.yaml` (`motion.soft_limits_steps`) через `tools/generate_motion_limits_header.py` -> `vital_motion/Core/Inc/motion_limits.h`.
 - `robot-motion-cli` поддерживает `reset-fault`.
+
+---
+
+## Encoders A/B (UART, legacy AT protocol)
+
+- `pyrobot/hal/encoder_bus.py`: чтение `port_a` / `port_b`, `AT+PRATE=0`, парсинг `Angle:...`, legacy transform (как vitalSoft).
+- `Stm32MotionBus.q_enc_deg`:
+  - **A/B** — реальные энкодеры (если порты доступны),
+  - **C/D** — пока step counters STM32.
+- Offsets: `config/encoders_offsets.json`, home `[90, 90, 0, 0]`.
+- CLI:
+  - `python -m pyrobot.hal.motion_cli enc-state` — только энкодеры A/B
+  - `python -m pyrobot.hal.motion_cli zero-encoders` — калибровка нуля (AT+ZERO + offset, home 90/90)
+- ZMQ:
+  - `python -m pyrobot.hal.encoder_daemon` или `robot-encoder-daemon` — публикует `EncoderState` @ `encoders.poll_hz`
+  - `python tools/encoder_sub.py` — отладочный подписчик
+- Offsets: `config/encoders_offsets.json` (в .gitignore), шаблон `config/encoders_offsets.json.example`

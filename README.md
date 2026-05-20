@@ -83,6 +83,10 @@ uv run python -m pyrobot.hal.fake_motion          # локальный симу�
 uv run robot-fake-motion                          # ZMQ-демон motion
 uv run robot-motion-cli state                     # CLI к motion backend из robot.yaml
 python tools/generate_motion_limits_header.py     # синхронизировать limits в firmware из robot.yaml
+python -m pyrobot.hal.motion_cli enc-state        # реальные углы A/B с UART-энкодеров
+python -m pyrobot.hal.motion_cli zero-encoders    # зафиксировать текущую позу как home (90/90/0/0)
+python -m pyrobot.hal.encoder_daemon              # ZMQ-публикация углов A/B
+python tools/encoder_sub.py --count 5             # проверка топика encoders.state
 ```
 
 ---

@@ -4,6 +4,8 @@ import argparse
 import json
 
 from pyrobot.config.load_config import load_config
+from pyrobot.hal.encoder_bus import ExternalEncoderBus, transform_legacy_ab
+from pyrobot.hal.encoder_offsets import load_offsets
 from pyrobot.hal.factory import create_motion_bus
 from pyrobot.hal.stm32_motion import Stm32MotionBus
 
@@ -33,6 +35,13 @@ def main() -> None:
     p_estop = sub.add_parser("estop")
     p_estop.add_argument("--show-state", action="store_true")
     sub.add_parser("reset-fault")
+    p_zero = sub.add_parser("zero-encoders")
+    p_zero.add_argument(
+        "--no-hardware-zero",
+        action="store_true",
+        help="Skip AT+ZERO on encoder devices (software offset only)",
+    )
+    sub.add_parser("enc-state")
 
     args = parser.parse_args()
     cfg = load_config(args.config)
@@ -84,6 +93,37 @@ def main() -> None:
                     print(True)
                 else:
                     print("reset-fault unsupported for this backend")
+            return
+
+        if args.cmd == "zero-encoders":
+            if isinstance(bus, Stm32MotionBus):
+                result = bus.zero_encoders(hardware_zero=not args.no_hardware_zero)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                _print_state(bus)
+            else:
+                print("zero-encoders unsupported for this backend")
+            return
+
+        if args.cmd == "enc-state":
+            offsets = load_offsets(cfg)
+            with ExternalEncoderBus(cfg) as enc:
+                raw_a, raw_b = enc.read_raw_ab()
+                ab = transform_legacy_ab(raw_a, raw_b)
+            calibrated = [ab[0] + offsets[0], ab[1] + offsets[1]]
+            print(
+                json.dumps(
+                    {
+                        "raw_deg": [raw_a, raw_b],
+                        "robot_ab_deg": [ab[0], ab[1]],
+                        "offset_ab_deg": [offsets[0], offsets[1]],
+                        "calibrated_ab_deg": calibrated,
+                        "home_ab_deg": [cfg.encoders.home_deg[0], cfg.encoders.home_deg[1]],
+                        "note": "calibrated_ab_deg = robot_ab_deg + offset_ab_deg; use zero-encoders at home pose",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return
     finally:
         close = getattr(bus, "close", None)
