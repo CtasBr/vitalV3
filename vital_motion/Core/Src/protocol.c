@@ -149,6 +149,11 @@ void protocol_rx_reset(void)
   rx_len = 0;
 }
 
+int protocol_rx_busy(void)
+{
+  return rx_len > 0U ? 1 : 0;
+}
+
 int protocol_rx_feed(uint8_t byte, pkt_raw_t *raw_out)
 {
   if (byte == 0)

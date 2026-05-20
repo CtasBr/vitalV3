@@ -142,12 +142,32 @@ def main() -> None:
         ser.write(wire)
         ser.flush()
         print(f"Sent PKT_PING seq=42 ({len(wire)} COBS bytes)", flush=True)
-        reply = read_cobs_frame(ser)
-        ptype, seq = parse_raw(reply)
-        if ptype != PKT_PONG or seq != 42:
-            print(f"FAIL: type={ptype:#x} seq={seq}", file=sys.stderr)
-            raise SystemExit(1)
-        print(f"OK: PKT_PONG seq={seq}")
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            try:
+                reply = read_cobs_frame(ser, timeout=1.0)
+            except TimeoutError:
+                continue
+
+            try:
+                ptype, seq = parse_raw(reply)
+            except ValueError as exc:
+                print(f"skip frame: {exc}", flush=True)
+                continue
+
+            if ptype == PKT_PING:
+                print("skip echoed PKT_PING", flush=True)
+                continue
+
+            if ptype != PKT_PONG or seq != 42:
+                print(f"FAIL: type={ptype:#x} seq={seq}", file=sys.stderr)
+                raise SystemExit(1)
+
+            print(f"OK: PKT_PONG seq={seq}")
+            return
+
+        print("FAIL: no PKT_PONG (M4 firmware? close screen? right port?)", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

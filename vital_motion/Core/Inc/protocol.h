@@ -61,6 +61,9 @@ int protocol_rx_feed(uint8_t byte, pkt_raw_t *raw_out);
 /** Reset RX parser (e.g. after line noise). */
 void protocol_rx_reset(void);
 
+/** True while COBS frame is currently being accumulated. */
+int protocol_rx_busy(void);
+
 #ifdef __cplusplus
 }
 #endif

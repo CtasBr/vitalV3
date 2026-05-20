@@ -148,6 +148,12 @@ void comm_uart_poll_loop(void)
       protocol_rx_reset();
     }
 
+    /* In binary COBS mode do not echo bytes back to host. */
+    if (protocol_rx_busy())
+    {
+      continue;
+    }
+
     /* Текстовый режим (с echo) */
     comm_uart_tx(&byte, 1);
 
