@@ -168,14 +168,43 @@ class Stm32MotionBus(MotionBus):
         amax_deg_s2: float = 90.0,
     ) -> SegmentId:
         del vmax_deg_s, amax_deg_s2
-        # temporary direct mapping: q_deg interpreted as target delta via steps.
-        # Proper planner to generate segments lives in next step.
-        deg_per_step = self._cfg.kinematics.deg_per_step
-        steps = [int(q / deg_per_step) for q in q_deg]
-        arr = [5000, 5000, 5000, 5000]
-        payload = struct.pack("<iiiiIIII", steps[0], steps[1], steps[2], steps[3], *arr)
+        # Safety-first transitional behavior:
+        # at current firmware stage we treat move_joints input as step deltas (not degrees).
+        # Proper IK/planner->segments path will replace this.
+        steps = [int(round(v)) for v in q_deg]
+        return self.move_steps(steps)
+
+    def move_steps(self, steps: list[int], arr: list[int] | None = None) -> SegmentId:
+        if len(steps) != 4:
+            raise ValueError("steps must have length 4")
+        # hard safety clamp for direct manual commands
+        max_abs_steps = 500
+        if any(abs(s) > max_abs_steps for s in steps):
+            raise ValueError(
+                f"step command too large {steps}; max abs per axis is {max_abs_steps}"
+            )
+        if arr is None:
+            arr = [5000, 5000, 5000, 5000]
+        if len(arr) != 4:
+            raise ValueError("arr must have length 4")
+
+        payload = struct.pack(
+            "<iiiiIIII",
+            steps[0],
+            steps[1],
+            steps[2],
+            steps[3],
+            arr[0],
+            arr[1],
+            arr[2],
+            arr[3],
+        )
         seg_id = self._send_packet(PKT_MOVE_SEGMENT, payload)
-        self._last_state = self._last_state.model_copy(update={"segment_id_active": seg_id, "in_motion": True})
+        deg_per_step = self._cfg.kinematics.deg_per_step
+        q_cmd = [s * deg_per_step for s in steps]
+        self._last_state = self._last_state.model_copy(
+            update={"segment_id_active": seg_id, "in_motion": True, "q_cmd_deg": q_cmd}
+        )
         return seg_id
 
     def stream_segments(self, segments: Iterable[MoveSegment]) -> None:

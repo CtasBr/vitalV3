@@ -126,6 +126,8 @@ Mac: `tools/uart_ping.py`, `tools/uart_step.py`
 
 **Следующий Python-шаг:** `stm32_motion_bridge` после M4–M5 на MCU.
 `pyrobot/hal/stm32_motion.py` добавлен: serial MotionBus к реальной плате.
+Safety note: current `move_joints()` in `Stm32MotionBus` treats input as **step deltas**
+(temporary transition), with hard clamp `abs(step)<=500` per axis.
 
 ---
 
