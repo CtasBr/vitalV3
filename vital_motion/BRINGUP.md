@@ -186,4 +186,10 @@ TIM prescaler/period: TIM1 167/10000, TIM2–4 83/10000 — как было.
    ```
 2. M5 full — реализовать физическое движение B/C/D  
 2. M6 — heartbeat / ESTOP  
+   ```bash
+   python3 tools/uart_pkt_heartbeat.py /dev/cu.usbmodemXXXX
+   python3 tools/uart_pkt_estop.py /dev/cu.usbmodemXXXX
+   ```
+   heartbeat: `OK: heartbeat echo ...`
+   estop: `OK: fault ... code=-2001`
 3. Кастомная плата: `MOTION_LINK_USE_USART3 0` → USART2

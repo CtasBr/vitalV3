@@ -30,6 +30,9 @@ int32_t motor_axis_pos_steps(uint8_t axis);
 uint8_t motor_axis_in_motion(uint8_t axis);
 uint8_t motor_any_in_motion(void);
 
+/** Emergency stop: stop all timers/channels immediately. */
+void motor_estop_all(void);
+
 #ifdef __cplusplus
 }
 #endif

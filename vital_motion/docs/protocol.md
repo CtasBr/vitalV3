@@ -26,7 +26,7 @@ Transport: **COBS** framing + **CRC16-CCITT** (poly 0x1021, init 0xFFFF).
 | `0x21` | `PKT_SEGMENT_DONE` | mcu→host |
 | `0x30` | `PKT_ESTOP` | host→mcu |
 | `0x31` | `PKT_FAULT` | mcu→host |
-| `0x3F` | `PKT_HEARTBEAT` | both @ 10 Hz |
+| `0x3F` | `PKT_HEARTBEAT` | both |
 
 ## COBS
 
@@ -62,3 +62,5 @@ Current firmware stage:
   - `[17] uint8 fault`
   - `[18..19] reserved`
   - `[20..23] int32 done_reserved`
+- supports `PKT_HEARTBEAT` echo (host→mcu, mcu→host)
+- supports `PKT_ESTOP` → immediate `motor_estop_all()` and `PKT_FAULT(-2001)`

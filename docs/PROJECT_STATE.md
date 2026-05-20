@@ -65,8 +65,8 @@ vitalV3/
 | **1-M2** | UART echo, `PING`→`PONG` | ✅ |
 | **1-M3** | Ось A: `STEP n [arr]`, TIM1 | ✅ **проверено пользователем** |
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
-| **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ код; нужна проверка на железе |
-| **1-M6** | Heartbeat, ESTOP, soft limits | ⏳ |
+| **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ |
+| **1-M6** | Heartbeat + ESTOP + fault bit in telemetry (soft-limits позже) | 🔄 код; нужна проверка |
 | **2** | Python motion_bridge + SHM camera | ⏳ |
 | **3–7** | Vision, kinematics, skills, AI | ⏳ |
 
@@ -77,7 +77,7 @@ vitalV3/
 | Файл | Роль |
 |------|------|
 | `main.c` | init, FreeRTOS tasks, `HAL_TIM_PeriodElapsedCallback` → TIM7 tick + TIM1 motor |
-| `comm_uart.c` | Текст + PKT (`PING/PONG`, `MOVE_SEGMENT`, `SEGMENT_DONE`, `FAULT`, `TELEMETRY`) |
+| `comm_uart.c` | Текст + PKT (`PING/PONG`, `MOVE_SEGMENT`, `SEGMENT_DONE`, `FAULT`, `TELEMETRY`, `HEARTBEAT`, `ESTOP`) |
 | `motor.c` | `motor_move_4axes(steps[4], arr[4])` — TIM1..TIM4 PWM |
 | `board_config.h` | USART3 vs USART2 |
 | `protocol.c` | M4: COBS, CRC16, `PKT_PING`→`PKT_PONG` |
@@ -163,6 +163,8 @@ python3 tools/uart_ping.py
 python3 tools/uart_step.py 20
 python3 tools/uart_pkt_ping.py   # M4
 python3 tools/uart_pkt_step.py 20 5000   # M5 payload (B/C/D=0)
+python3 tools/uart_pkt_heartbeat.py   # M6 heartbeat echo
+python3 tools/uart_pkt_estop.py       # M6 estop -> fault
 ```
 
 ---
@@ -177,7 +179,8 @@ python3 tools/uart_pkt_step.py 20 5000   # M5 payload (B/C/D=0)
 
 ## Следующая работа (M5 → M6)
 
-1. Реализовать физическое движение B/C/D (сейчас только A, B/C/D должны быть 0)
-2. Уточнить формат `PKT_TELEMETRY` и добавить host viewer
+1. Довести watchdog до preemptive-уровня (сейчас heartbeat timeout только при idle)
+2. Добавить soft-limits по всем осям
+3. Host-side telemetry viewer / logger
 3. Heartbeat + watchdog + ESTOP
 4. После M6: `pyrobot/hal/stm32_bridge.py` + `motion.backend: stm32`

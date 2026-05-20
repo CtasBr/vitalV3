@@ -22,6 +22,8 @@ extern UART_HandleTypeDef huart2;
 
 #define RX_LINE_MAX 48
 static uint16_t g_tx_seq;
+static uint8_t g_fault_code;
+static uint32_t g_last_hb_ms;
 
 static void comm_uart_tx(const uint8_t *data, uint16_t len)
 {
@@ -86,6 +88,19 @@ static void comm_uart_send_fault(uint16_t seq, int32_t code)
   comm_uart_send_raw_cobs(&pkt);
 }
 
+static void comm_uart_send_heartbeat(uint16_t seq)
+{
+  uint8_t payload[4];
+  pkt_raw_t pkt;
+  uint32_t uptime = HAL_GetTick();
+  memcpy(payload, &uptime, sizeof(uptime));
+  if (protocol_build(&pkt, PKT_HEARTBEAT, seq, payload, sizeof(payload)) != 0)
+  {
+    return;
+  }
+  comm_uart_send_raw_cobs(&pkt);
+}
+
 static void comm_uart_send_telemetry(void)
 {
   uint8_t payload[24];
@@ -100,7 +115,7 @@ static void comm_uart_send_telemetry(void)
                            (motor_axis_in_motion(1) ? 0x2U : 0U) |
                            (motor_axis_in_motion(2) ? 0x4U : 0U) |
                            (motor_axis_in_motion(3) ? 0x8U : 0U);
-  uint8_t fault = 0;
+  uint8_t fault = g_fault_code;
   uint16_t reserved = 0;
   int32_t done = 0; /* reserved */
 
@@ -123,6 +138,21 @@ static void comm_uart_send_telemetry(void)
 
 static void comm_uart_handle_binary(const pkt_raw_t *pkt)
 {
+  if (pkt->type == (uint8_t)PKT_HEARTBEAT)
+  {
+    g_last_hb_ms = HAL_GetTick();
+    comm_uart_send_heartbeat(pkt->seq);
+    return;
+  }
+
+  if (pkt->type == (uint8_t)PKT_ESTOP)
+  {
+    motor_estop_all();
+    g_fault_code = 1;
+    comm_uart_send_fault(pkt->seq, -2001);
+    return;
+  }
+
   if (pkt->type == (uint8_t)PKT_PING)
   {
     comm_uart_send_pong(pkt->seq);
@@ -160,10 +190,12 @@ static void comm_uart_handle_binary(const pkt_raw_t *pkt)
 
     if (motor_move_4axes(steps, arr) == 0)
     {
+      g_fault_code = 0;
       comm_uart_send_segment_done(pkt->seq, steps);
     }
     else
     {
+      g_fault_code = 2;
       comm_uart_send_fault(pkt->seq, -1003);
     }
   }
@@ -177,9 +209,11 @@ void comm_uart_init(void)
   comm_uart_tx_str("\r\n=== vital_motion M5 (USART2) ===\r\n");
 #endif
   comm_uart_tx_str("Text: PING | STEP <n> [arr]\r\n");
-  comm_uart_tx_str("Binary: PKT_PING, PKT_MOVE_SEGMENT(4axis), PKT_TELEMETRY\r\n");
+  comm_uart_tx_str("Binary: PING/MOVE/TELEMETRY/HEARTBEAT/ESTOP\r\n");
   protocol_rx_reset();
   g_tx_seq = 0;
+  g_fault_code = 0;
+  g_last_hb_ms = HAL_GetTick();
 }
 
 static void comm_uart_handle_line(const char *line)
@@ -245,6 +279,11 @@ void comm_uart_poll_loop(void)
     {
       comm_uart_send_telemetry();
       last_telemetry_ms = now;
+    }
+
+    if (!motor_any_in_motion() && (now - g_last_hb_ms) > 1000U)
+    {
+      g_fault_code = 3;
     }
 
     if (HAL_UART_Receive(MOTION_UART, &byte, 1, 20) != HAL_OK)

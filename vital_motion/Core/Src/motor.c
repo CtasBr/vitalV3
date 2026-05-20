@@ -201,3 +201,15 @@ uint8_t motor_any_in_motion(void)
   }
   return 0;
 }
+
+void motor_estop_all(void)
+{
+  for (uint8_t i = 0; i < 4; i++)
+  {
+    axis_rt_t *ax = &g_axes[i];
+    ax->running = 0;
+    HAL_TIM_PWM_Stop(ax->htim, ax->channel);
+    HAL_TIM_Base_Stop_IT(ax->htim);
+    (void)osSemaphoreRelease(g_done_sems[i]);
+  }
+}
