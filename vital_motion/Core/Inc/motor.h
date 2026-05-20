@@ -24,6 +24,10 @@ int motor_axis_a_move(int32_t steps, uint32_t tim_arr);
 /** Вызывать из HAL_TIM_PeriodElapsedCallback при TIM1. */
 void motor_tim1_period_elapsed(void);
 
+/** Telemetry helpers. */
+int32_t motor_axis_a_pos_steps(void);
+uint8_t motor_axis_a_in_motion(void);
+
 #ifdef __cplusplus
 }
 #endif

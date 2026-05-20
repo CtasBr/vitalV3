@@ -175,11 +175,12 @@ TIM prescaler/period: TIM1 167/10000, TIM2–4 83/10000 — как было.
 
 ## После M4
 
-1. M5-min (уже в коде) — `PKT_MOVE_SEGMENT` для оси A:  
+1. M5 payload (в коде) — `PKT_MOVE_SEGMENT` с 4 осями (пока физически двигается только A):  
    ```bash
    python3 tools/uart_pkt_step.py 20 5000
    ```
    Ожидаешь: `OK: PKT_SEGMENT_DONE ...`
-2. M5 full — 4 оси + расширенный payload  
+   Если B/C/D не нули — `PKT_FAULT code=-1002`.
+2. M5 full — реализовать физическое движение B/C/D  
 2. M6 — heartbeat / ESTOP  
 3. Кастомная плата: `MOTION_LINK_USE_USART3 0` → USART2

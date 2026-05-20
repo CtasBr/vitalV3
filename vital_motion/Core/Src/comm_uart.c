@@ -21,6 +21,7 @@ extern UART_HandleTypeDef huart2;
 #endif
 
 #define RX_LINE_MAX 48
+static uint16_t g_tx_seq;
 
 static void comm_uart_tx(const uint8_t *data, uint16_t len)
 {
@@ -70,6 +71,42 @@ static void comm_uart_send_segment_done(uint16_t seq, int32_t done_steps)
   comm_uart_send_raw_cobs(&pkt);
 }
 
+static void comm_uart_send_fault(uint16_t seq, int32_t code)
+{
+  uint8_t payload[4];
+  pkt_raw_t pkt;
+  memcpy(payload, &code, sizeof(code));
+  if (protocol_build(&pkt, PKT_FAULT, seq, payload, sizeof(payload)) != 0)
+  {
+    return;
+  }
+  comm_uart_send_raw_cobs(&pkt);
+}
+
+static void comm_uart_send_telemetry(void)
+{
+  uint8_t payload[12];
+  pkt_raw_t pkt;
+  int32_t pos = motor_axis_a_pos_steps();
+  uint8_t in_motion = motor_axis_a_in_motion();
+  uint8_t fault = 0;
+  uint16_t reserved = 0;
+  int32_t done = 0;
+
+  memcpy(&payload[0], &pos, sizeof(pos));
+  payload[4] = in_motion;
+  payload[5] = fault;
+  memcpy(&payload[6], &reserved, sizeof(reserved));
+  memcpy(&payload[8], &done, sizeof(done));
+
+  g_tx_seq++;
+  if (protocol_build(&pkt, PKT_TELEMETRY, g_tx_seq, payload, sizeof(payload)) != 0)
+  {
+    return;
+  }
+  comm_uart_send_raw_cobs(&pkt);
+}
+
 static void comm_uart_handle_binary(const pkt_raw_t *pkt)
 {
   if (pkt->type == (uint8_t)PKT_PING)
@@ -80,34 +117,59 @@ static void comm_uart_handle_binary(const pkt_raw_t *pkt)
 
   if (pkt->type == (uint8_t)PKT_MOVE_SEGMENT)
   {
-    /* M5-min payload layout (LE):
-     * [0..3] int32 steps_a
-     * [4..7] uint32 arr_a
+    /* M5 payload layout (LE):
+     * [0..3]   int32 steps_a
+     * [4..7]   int32 steps_b
+     * [8..11]  int32 steps_c
+     * [12..15] int32 steps_d
+     * [16..19] uint32 arr_a
+     * [20..23] uint32 arr_b
+     * [24..27] uint32 arr_c
+     * [28..31] uint32 arr_d
      */
-    if (pkt->payload_len < 8U)
+    if (pkt->payload_len < 32U)
     {
+      comm_uart_send_fault(pkt->seq, -1001);
       return;
     }
 
-    int32_t steps = 0;
+    int32_t steps_a = 0, steps_b = 0, steps_c = 0, steps_d = 0;
     uint32_t arr = 5000U;
-    memcpy(&steps, &pkt->payload[0], sizeof(steps));
-    memcpy(&arr, &pkt->payload[4], sizeof(arr));
-    (void)motor_axis_a_move(steps, arr);
-    comm_uart_send_segment_done(pkt->seq, steps);
+    memcpy(&steps_a, &pkt->payload[0], sizeof(steps_a));
+    memcpy(&steps_b, &pkt->payload[4], sizeof(steps_b));
+    memcpy(&steps_c, &pkt->payload[8], sizeof(steps_c));
+    memcpy(&steps_d, &pkt->payload[12], sizeof(steps_d));
+    memcpy(&arr, &pkt->payload[16], sizeof(arr));
+
+    /* M5-stage: implemented physically only for axis A; require B/C/D to be 0. */
+    if ((steps_b != 0) || (steps_c != 0) || (steps_d != 0))
+    {
+      comm_uart_send_fault(pkt->seq, -1002);
+      return;
+    }
+
+    if (motor_axis_a_move(steps_a, arr) == 0)
+    {
+      comm_uart_send_segment_done(pkt->seq, steps_a);
+    }
+    else
+    {
+      comm_uart_send_fault(pkt->seq, -1003);
+    }
   }
 }
 
 void comm_uart_init(void)
 {
 #if MOTION_LINK_USE_USART3
-  comm_uart_tx_str("\r\n=== vital_motion M4 (USART3 / ST-Link) ===\r\n");
+  comm_uart_tx_str("\r\n=== vital_motion M5 (USART3 / ST-Link) ===\r\n");
 #else
-  comm_uart_tx_str("\r\n=== vital_motion M4 (USART2) ===\r\n");
+  comm_uart_tx_str("\r\n=== vital_motion M5 (USART2) ===\r\n");
 #endif
   comm_uart_tx_str("Text: PING | STEP <n> [arr]\r\n");
-  comm_uart_tx_str("Binary: PKT_PING, PKT_MOVE_SEGMENT (tools/uart_pkt_*.py)\r\n");
+  comm_uart_tx_str("Binary: PKT_PING, PKT_MOVE_SEGMENT(4axis), PKT_TELEMETRY\r\n");
   protocol_rx_reset();
+  g_tx_seq = 0;
 }
 
 static void comm_uart_handle_line(const char *line)
@@ -162,9 +224,17 @@ void comm_uart_poll_loop(void)
   char line[RX_LINE_MAX];
   unsigned line_len = 0;
   pkt_raw_t pkt;
+  uint32_t last_telemetry_ms = 0;
 
   for (;;)
   {
+    uint32_t now = HAL_GetTick();
+    if ((now - last_telemetry_ms) >= 100U)
+    {
+      comm_uart_send_telemetry();
+      last_telemetry_ms = now;
+    }
+
     if (HAL_UART_Receive(MOTION_UART, &byte, 1, 20) != HAL_OK)
     {
       osDelay(1);

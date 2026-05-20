@@ -65,7 +65,7 @@ vitalV3/
 | **1-M2** | UART echo, `PING`→`PONG` | ✅ |
 | **1-M3** | Ось A: `STEP n [arr]`, TIM1 | ✅ **проверено пользователем** |
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
-| **1-M5** | M5-min: PKT_MOVE_SEGMENT для оси A + SEGMENT_DONE | 🔄 код; усилили ACK (x2), нужна проверка |
+| **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), A-axis exec, SEGMENT_DONE/FAULT | 🔄 код; нужна проверка |
 | **1-M6** | Heartbeat, ESTOP, soft limits | ⏳ |
 | **2** | Python motion_bridge + SHM camera | ⏳ |
 | **3–7** | Vision, kinematics, skills, AI | ⏳ |
@@ -77,7 +77,7 @@ vitalV3/
 | Файл | Роль |
 |------|------|
 | `main.c` | init, FreeRTOS tasks, `HAL_TIM_PeriodElapsedCallback` → TIM7 tick + TIM1 motor |
-| `comm_uart.c` | Текст + бинарные PKT (`PING/PONG`, `MOVE_SEGMENT`, `SEGMENT_DONE`) |
+| `comm_uart.c` | Текст + PKT (`PING/PONG`, `MOVE_SEGMENT`, `SEGMENT_DONE`, `FAULT`, `TELEMETRY`) |
 | `motor.c` | `motor_axis_a_move(steps, tim_arr)` — TIM1 PWM |
 | `board_config.h` | USART3 vs USART2 |
 | `protocol.c` | M4: COBS, CRC16, `PKT_PING`→`PKT_PONG` |
@@ -162,7 +162,7 @@ screen /dev/cu.usbmodem* 115200
 python3 tools/uart_ping.py
 python3 tools/uart_step.py 20
 python3 tools/uart_pkt_ping.py   # M4
-python3 tools/uart_pkt_step.py 20 5000   # M5-min
+python3 tools/uart_pkt_step.py 20 5000   # M5 payload (B/C/D=0)
 ```
 
 ---
@@ -177,7 +177,7 @@ python3 tools/uart_pkt_step.py 20 5000   # M5-min
 
 ## Следующая работа (M5 → M6)
 
-1. Расширить `PKT_MOVE_SEGMENT` до 4 осей (A/B/C/D)
-2. Добавить `PKT_TELEMETRY` 100 Hz
+1. Реализовать физическое движение B/C/D (сейчас только A, B/C/D должны быть 0)
+2. Уточнить формат `PKT_TELEMETRY` и добавить host viewer
 3. Heartbeat + watchdog + ESTOP
 4. После M6: `pyrobot/hal/stm32_bridge.py` + `motion.backend: stm32`

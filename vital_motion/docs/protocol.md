@@ -39,7 +39,7 @@ Host sends COBS(`PKT_PING`, seq=N). MCU replies COBS(`PKT_PONG`, same seq).
 
 Text commands (`PING`, `STEP`) remain for bring-up until M5.
 
-## M5-min implemented (axis A only)
+## M5 payload (implemented)
 
 `PKT_MOVE_SEGMENT` payload (8 bytes, LE):
 
@@ -52,3 +52,13 @@ MCU executes `motor_axis_a_move(steps_a, arr_a)` and replies:
 
 - `PKT_SEGMENT_DONE` with same `seq`
 - payload 4 bytes: `done_steps` (int32)
+
+Current firmware stage:
+
+- validates that `steps_b/c/d == 0` (otherwise sends `PKT_FAULT` code `-1002`)
+- supports `PKT_TELEMETRY` every ~100 ms, payload:
+  - `[0..3] int32 pos_a_steps`
+  - `[4] uint8 in_motion`
+  - `[5] uint8 fault`
+  - `[6..7] reserved`
+  - `[8..11] int32 done_reserved`

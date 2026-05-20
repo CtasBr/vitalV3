@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""M5-min: send PKT_MOVE_SEGMENT (axis A only) and wait PKT_SEGMENT_DONE."""
+"""M5: send PKT_MOVE_SEGMENT (4-axis payload) and wait PKT_SEGMENT_DONE."""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ PKT_VERSION = 1
 PKT_RAW_SIZE = 54
 PKT_MOVE_SEGMENT = 0x10
 PKT_SEGMENT_DONE = 0x21
+PKT_TELEMETRY = 0x20
+PKT_FAULT = 0x31
 
 
 def crc16_ccitt(data: bytes) -> int:
@@ -132,7 +134,18 @@ def main() -> None:
             raise SystemExit(1)
         port = ports[-1]
 
-    payload = struct.pack("<iI", args.steps, args.arr)
+    # 4-axis payload (B/C/D = 0 for current firmware stage)
+    payload = struct.pack(
+        "<iiiiIIII",
+        args.steps,
+        0,
+        0,
+        0,
+        args.arr,
+        5000,
+        5000,
+        5000,
+    )
     raw = build_raw(PKT_MOVE_SEGMENT, seq=args.seq, payload=payload)
     wire = cobs_encode(raw)
 
@@ -160,6 +173,12 @@ def main() -> None:
             except ValueError as exc:
                 print(f"skip frame (raw): {exc}")
                 continue
+            if ptype == PKT_TELEMETRY:
+                continue
+            if ptype == PKT_FAULT:
+                code = struct.unpack("<i", payload_rx[:4])[0] if len(payload_rx) >= 4 else 0
+                print(f"FAIL: PKT_FAULT seq={seq}, code={code}", file=sys.stderr)
+                raise SystemExit(1)
             if ptype != PKT_SEGMENT_DONE:
                 continue
             if seq != args.seq:

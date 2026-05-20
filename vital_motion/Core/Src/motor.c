@@ -12,6 +12,8 @@ static osSemaphoreId_t motor_done_sem;
 static volatile uint32_t motor_target_steps;
 static volatile uint32_t motor_done_steps;
 static volatile uint8_t motor_running;
+static volatile int32_t motor_pos_steps;
+static volatile int8_t motor_dir_sign;
 
 void motor_init(void)
 {
@@ -20,6 +22,8 @@ void motor_init(void)
   motor_running = 0;
   motor_target_steps = 0;
   motor_done_steps = 0;
+  motor_pos_steps = 0;
+  motor_dir_sign = 1;
 
   HAL_GPIO_WritePin(aDir_GPIO_Port, aDir_Pin, GPIO_PIN_RESET);
   HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
@@ -43,6 +47,7 @@ int motor_axis_a_move(int32_t steps, uint32_t tim_arr)
 
   const uint32_t n = (steps > 0) ? (uint32_t)steps : (uint32_t)(-steps);
   const GPIO_PinState dir_pin = (steps > 0) ? GPIO_PIN_SET : GPIO_PIN_RESET;
+  motor_dir_sign = (steps > 0) ? 1 : -1;
 
   HAL_GPIO_WritePin(aDir_GPIO_Port, aDir_Pin, dir_pin);
 
@@ -89,6 +94,7 @@ void motor_tim1_period_elapsed(void)
   }
 
   motor_done_steps++;
+  motor_pos_steps += (int32_t)motor_dir_sign;
   if (motor_done_steps >= motor_target_steps)
   {
     motor_running = 0;
@@ -96,4 +102,14 @@ void motor_tim1_period_elapsed(void)
     HAL_TIM_Base_Stop_IT(&htim1);
     (void)osSemaphoreRelease(motor_done_sem);
   }
+}
+
+int32_t motor_axis_a_pos_steps(void)
+{
+  return motor_pos_steps;
+}
+
+uint8_t motor_axis_a_in_motion(void)
+{
+  return motor_running;
 }
