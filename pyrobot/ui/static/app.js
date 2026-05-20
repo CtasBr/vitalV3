@@ -261,6 +261,7 @@ function parseVoiceIntent(phrase) {
   return null;
 }
 
+/** Russian spoken name → COCO / YOLO class_name (English). */
 const YOLO_RU_ALIASES = {
   чашка: "cup",
   чашку: "cup",
@@ -279,21 +280,101 @@ const YOLO_RU_ALIASES = {
   собака: "dog",
   кошка: "cat",
   кот: "cat",
+  ножницы: "scissors",
+  ножниц: "scissors",
+  ножница: "scissors",
+  ножницыми: "scissors",
+  вилка: "fork",
+  вилку: "fork",
+  ложка: "spoon",
+  ложку: "spoon",
+  нож: "knife",
+  ножа: "knife",
+  яблоко: "apple",
+  банан: "banana",
+  апельсин: "orange",
+  машина: "car",
+  автомобиль: "car",
+  велосипед: "bicycle",
+  самолёт: "airplane",
+  самолет: "airplane",
+  птица: "bird",
+  лошадь: "horse",
+  корова: "cow",
+  слон: "elephant",
+  мишка: "teddy bear",
+  медведь: "teddy bear",
+  часы: "clock",
+  ваза: "vase",
+  раковина: "sink",
+  холодильник: "refrigerator",
+  телевизор: "tv",
+  телик: "tv",
+  пицца: "pizza",
+  торшер: "tie",
+  галстук: "tie",
+  рюкзак: "backpack",
+  зонт: "umbrella",
+  зонтик: "umbrella",
+  очки: "eyeglasses",
+  клавиатура: "keyboard",
+  мышь: "mouse",
+  мышка: "mouse",
+  пульт: "remote",
+  диван: "couch",
+  кровать: "bed",
+  стол: "dining table",
+  туалет: "toilet",
+  растение: "potted plant",
+  цветок: "potted plant",
+  лампа: "traffic light",
+  светофор: "traffic light",
 };
 
+function normalizeSeeObject(name) {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/^[«"'"]+|[»"'".?!,]+$/g, "")
+    .trim();
+}
+
 function yoloQueryTerms(name) {
-  const raw = name.toLowerCase().trim();
+  const raw = normalizeSeeObject(name);
+  const terms = new Set([raw]);
   const en = YOLO_RU_ALIASES[raw];
-  return en ? [raw, en] : [raw];
+  if (en) {
+    terms.add(en);
+    for (const w of en.split(/\s+/)) terms.add(w);
+  }
+  return [...terms];
+}
+
+function yoloClassMatchesTerms(cls, terms) {
+  const c = cls.toLowerCase();
+  const clsWords = c.split(/\s+/);
+  for (const needle of terms) {
+    if (!needle) continue;
+    if (c === needle) return true;
+    if (c.includes(needle) || needle.includes(c)) return true;
+    const nw = needle.split(/\s+/);
+    if (nw.length > 1 && nw.every((w) => clsWords.includes(w))) return true;
+    if (nw.length === 1 && clsWords.some((w) => w === nw || w.startsWith(nw) || nw.startsWith(w))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function yoloSeesObject(name) {
   const terms = yoloQueryTerms(name);
   const dets = lastState?.vision?.detections || [];
-  return dets.some((d) => {
-    const cls = (d.class_name || "").toLowerCase();
-    return terms.some((needle) => cls === needle || cls.includes(needle) || needle.includes(cls));
-  });
+  return dets.some((d) => yoloClassMatchesTerms(d.class_name || "", terms));
+}
+
+function yoloVisibleClassList() {
+  const dets = lastState?.vision?.detections || [];
+  return [...new Set(dets.map((d) => d.class_name).filter(Boolean))];
 }
 
 async function ensurePose() {
@@ -378,12 +459,19 @@ async function runGesture(intent, feed) {
 }
 
 async function runSeeObject(objectName, feed) {
+  const data = await fetchState();
+  lastState = data;
+
   const seen = yoloSeesObject(objectName);
+  const visible = yoloVisibleClassList();
+  const mapped = YOLO_RU_ALIASES[normalizeSeeObject(objectName)];
+
   if (seen) {
-    voiceStatus.textContent = `Вижу «${objectName}» — киваю`;
+    voiceStatus.textContent = `Вижу «${objectName}»${mapped ? ` (${mapped})` : ""} — киваю`;
     await runGestureNod(feed);
   } else {
-    voiceStatus.textContent = `Не вижу «${objectName}» — мотаю головой`;
+    const hint = visible.length ? ` Сейчас YOLO: ${visible.join(", ")}.` : " YOLO пусто.";
+    voiceStatus.textContent = `Не вижу «${objectName}»${mapped ? ` (ищу ${mapped})` : ""} — мотаю головой.${hint}`;
     await runGestureShake(feed);
   }
 }
