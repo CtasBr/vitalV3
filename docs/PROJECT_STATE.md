@@ -67,7 +67,7 @@ vitalV3/
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
 | **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ |
 | **1-M6** | Heartbeat + ESTOP + fault bit in telemetry (soft-limits позже) | 🔄 код; нужна проверка |
-| **2** | Python motion_bridge + SHM camera | ⏳ |
+| **2** | Python stm32 bridge + SHM camera | 🔄 started (`Stm32MotionBus`) |
 | **3–7** | Vision, kinematics, skills, AI | ⏳ |
 
 ---
@@ -80,7 +80,7 @@ vitalV3/
 | `comm_uart.c` | Текст + PKT (`PING/PONG`, `MOVE_SEGMENT`, `SEGMENT_DONE`, `FAULT`, `TELEMETRY`, `HEARTBEAT`, `ESTOP`) |
 | `motor.c` | `motor_move_4axes(steps[4], arr[4])` — TIM1..TIM4 PWM |
 | `board_config.h` | USART3 vs USART2 |
-| `protocol.c` | M4: COBS, CRC16, `PKT_PING`→`PKT_PONG` |
+| `protocol.c` | COBS/CRC, PKT dispatch (`PING/MOVE/TELEMETRY/HEARTBEAT/ESTOP`) |
 | `BRINGUP.md` | Пошаговая инструкция |
 
 **CubeIDE:** новые `.c` в `Core/Src` нужно **перетащить в Project Explorer** (не появляются автоматически). `Debug/` в `.gitignore`.
@@ -125,6 +125,7 @@ Mac: `tools/uart_ping.py`, `tools/uart_step.py`
 - `pytest` — 8 тестов
 
 **Следующий Python-шаг:** `stm32_motion_bridge` после M4–M5 на MCU.
+`pyrobot/hal/stm32_motion.py` добавлен: serial MotionBus к реальной плате.
 
 ---
 
