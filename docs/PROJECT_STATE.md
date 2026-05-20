@@ -67,7 +67,7 @@ vitalV3/
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
 | **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ |
 | **1-M6** | Heartbeat + ESTOP + fault bit in telemetry (soft-limits позже) | 🔄 код; нужна проверка |
-| **2** | Python stm32 bridge + SHM camera | 🔄 started (`Stm32MotionBus`) |
+| **2** | Python stm32 bridge + SHM camera | 🔄 started (`Stm32MotionBus` + `robot-motion-cli`) |
 | **3–7** | Vision, kinematics, skills, AI | ⏳ |
 
 ---
@@ -128,6 +128,7 @@ Mac: `tools/uart_ping.py`, `tools/uart_step.py`
 `pyrobot/hal/stm32_motion.py` добавлен: serial MotionBus к реальной плате.
 Safety note: current `move_joints()` in `Stm32MotionBus` treats input as **step deltas**
 (temporary transition), with hard clamp `abs(step)<=500` per axis.
+Added `create_motion_bus()` and CLI entrypoint `robot-motion-cli`.
 
 ---
 

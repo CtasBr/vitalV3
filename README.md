@@ -81,6 +81,7 @@ uv sync --extra dev
 uv run pytest
 uv run python -m pyrobot.hal.fake_motion          # локальный симулятор
 uv run robot-fake-motion                          # ZMQ-демон motion
+uv run robot-motion-cli state                     # CLI к motion backend из robot.yaml
 ```
 
 ---
