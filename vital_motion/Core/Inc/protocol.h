@@ -25,6 +25,7 @@ typedef enum {
   PKT_SEGMENT_DONE = 0x21,
   PKT_ESTOP = 0x30,
   PKT_FAULT = 0x31,
+  PKT_RESET_FAULT = 0x32,
   PKT_HEARTBEAT = 0x3F,
 } pkt_type_t;
 

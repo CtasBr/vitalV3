@@ -185,8 +185,15 @@ python3 tools/uart_pkt_estop.py       # M6 estop -> fault
 
 ## Следующая работа (M5 → M6)
 
-1. Довести watchdog до preemptive-уровня (сейчас heartbeat timeout только при idle)
-2. Добавить soft-limits по всем осям
-3. Host-side telemetry viewer / logger
-3. Heartbeat + watchdog + ESTOP
-4. После M6: `pyrobot/hal/stm32_bridge.py` + `motion.backend: stm32`
+1. Host-side telemetry viewer / logger
+2. Привязать soft-limits к `config/robot.yaml` (сейчас в firmware константы +/-4800 шагов)
+3. После M6: `pyrobot/hal/stm32_bridge.py` + `motion.backend: stm32`
+
+---
+
+## M6 safety status (current)
+
+- Heartbeat watchdog активируется только после первого heartbeat (`g_hb_seen`) и не даёт ложный fault на старте.
+- Добавлен `PKT_RESET_FAULT` (`0x32`) host→mcu; MCU отвечает `PKT_FAULT(0)` при успешном сбросе.
+- Добавлены firmware soft-limits по каждой оси: значения берутся из `config/robot.yaml` (`motion.soft_limits_steps`) через `tools/generate_motion_limits_header.py` -> `vital_motion/Core/Inc/motion_limits.h`.
+- `robot-motion-cli` поддерживает `reset-fault`.

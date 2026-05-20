@@ -82,6 +82,7 @@ uv run pytest
 uv run python -m pyrobot.hal.fake_motion          # локальный симулятор
 uv run robot-fake-motion                          # ZMQ-демон motion
 uv run robot-motion-cli state                     # CLI к motion backend из robot.yaml
+python tools/generate_motion_limits_header.py     # синхронизировать limits в firmware из robot.yaml
 ```
 
 ---

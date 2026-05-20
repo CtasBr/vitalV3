@@ -32,6 +32,7 @@ def main() -> None:
 
     p_estop = sub.add_parser("estop")
     p_estop.add_argument("--show-state", action="store_true")
+    sub.add_parser("reset-fault")
 
     args = parser.parse_args()
     cfg = load_config(args.config)
@@ -70,6 +71,19 @@ def main() -> None:
             print("OK estop sent")
             if args.show_state:
                 _print_state(bus)
+            return
+
+        if args.cmd == "reset-fault":
+            if isinstance(bus, Stm32MotionBus):
+                ok = bus.reset_fault()
+                print(ok)
+            else:
+                reset = getattr(bus, "reset_fault", None)
+                if callable(reset):
+                    reset()
+                    print(True)
+                else:
+                    print("reset-fault unsupported for this backend")
             return
     finally:
         close = getattr(bus, "close", None)

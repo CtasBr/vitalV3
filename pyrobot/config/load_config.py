@@ -37,6 +37,15 @@ class MotionConfig(BaseModel):
     telemetry_hz: int = 100
     heartbeat_hz: int = 10
     watchdog_ms: int = 200
+    max_abs_steps_cmd: int = 500
+    soft_limits_steps: dict[str, tuple[int, int]] = Field(
+        default_factory=lambda: {
+            "a": (-4800, 4800),
+            "b": (-4800, 4800),
+            "c": (-4800, 4800),
+            "d": (-4800, 4800),
+        }
+    )
 
 
 class EncodersConfig(BaseModel):

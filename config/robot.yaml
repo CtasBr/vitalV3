@@ -14,14 +14,20 @@ zmq:
     heartbeat: "heartbeat"
 
 motion:
-  backend: "fake"  # fake | stm32 | legacy
+  backend: "stm32"  # fake | stm32 | legacy
   # NUCLEO + один USB ST-Link: /dev/cu.usbmodem* (USART3). Кастомная плата: usbserial → USART2
-  port: "/dev/cu.usbmodem14103"
+  port: "/dev/cu.usbmodem21203"
   baudrate: 115200
   num_axes: 4
   telemetry_hz: 100
   heartbeat_hz: 10
   watchdog_ms: 200
+  max_abs_steps_cmd: 4000  # host-side per-axis clamp for manual move-steps
+  soft_limits_steps:
+    a: [-4800, 4800]
+    b: [-4800, 4800]
+    c: [-4800, 4800]
+    d: [-4800, 4800]
 
 encoders:
   port_a: "/dev/cu.usbserial-3140"

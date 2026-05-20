@@ -16,6 +16,7 @@ from pyrobot.hal.stm32_protocol import (
     PKT_MOVE_SEGMENT,
     PKT_PING,
     PKT_PONG,
+    PKT_RESET_FAULT,
     PKT_SEGMENT_DONE,
     PKT_TELEMETRY,
     build_raw,
@@ -38,6 +39,9 @@ class Stm32MotionBus(MotionBus):
             self._cfg.motion.baudrate,
             timeout=timeout_s,
         )
+        # Drop any boot/banner leftovers on port open.
+        time.sleep(0.05)
+        self._ser.reset_input_buffer()
         self._seq = 1
         self._last_state = MotionState(node="stm32_motion")
         self._last_done: tuple[int, list[int]] | None = None
@@ -105,7 +109,11 @@ class Stm32MotionBus(MotionBus):
             code = struct.unpack("<i", payload[:4])[0] if len(payload) >= 4 else -1
             self._fault_code = code
             self._last_state = self._last_state.model_copy(
-                update={"fault_code": code, "fault_message": "mcu_fault", "in_motion": False}
+                update={
+                    "fault_code": code,
+                    "fault_message": "mcu_fault" if code else "",
+                    "in_motion": False,
+                }
             )
             return
         if pkt_type in (PKT_PONG, PKT_HEARTBEAT):
@@ -117,6 +125,9 @@ class Stm32MotionBus(MotionBus):
         pos = list(struct.unpack("<iiii", payload[:16]))
         in_motion_mask = payload[16]
         fault = payload[17]
+        # Keep host-side fault state aligned with current telemetry.
+        # Firmware currently reports latched fault in telemetry byte.
+        self._fault_code = int(fault)
         deg_per_step = self._cfg.kinematics.deg_per_step
         q_enc = [p * deg_per_step for p in pos]
         in_motion = in_motion_mask != 0
@@ -128,8 +139,8 @@ class Stm32MotionBus(MotionBus):
             in_motion=in_motion,
             segment_id_active=self._last_state.segment_id_active,
             segment_id_done=self._last_state.segment_id_done,
-            fault_code=fault if fault else self._fault_code,
-            fault_message="mcu_fault" if (fault or self._fault_code) else "",
+            fault_code=self._fault_code,
+            fault_message="mcu_fault" if self._fault_code else "",
         )
 
     def pump(self, timeout_s: float = 0.02) -> None:
@@ -140,16 +151,19 @@ class Stm32MotionBus(MotionBus):
         self._handle_packet(pkt_type, seq, payload)
 
     def ping(self, timeout_s: float = 2.0) -> bool:
-        seq = self._send_packet(PKT_PING)
         deadline = time.monotonic() + timeout_s
+        # Retry a few times because USB CDC/ST-Link can drop/garble occasional frames.
         while time.monotonic() < deadline:
-            try:
-                pkt_type, rx_seq, payload = self._read_frame(0.5)
-            except TimeoutError:
-                continue
-            self._handle_packet(pkt_type, rx_seq, payload)
-            if pkt_type == PKT_PONG and rx_seq == seq:
-                return True
+            seq = self._send_packet(PKT_PING)
+            attempt_deadline = min(deadline, time.monotonic() + 0.6)
+            while time.monotonic() < attempt_deadline:
+                try:
+                    pkt_type, rx_seq, payload = self._read_frame(0.25)
+                except TimeoutError:
+                    continue
+                self._handle_packet(pkt_type, rx_seq, payload)
+                if pkt_type == PKT_PONG and rx_seq == seq:
+                    return True
         return False
 
     def send_heartbeat(self, timeout_s: float = 1.0) -> bool:
@@ -182,7 +196,9 @@ class Stm32MotionBus(MotionBus):
         if len(steps) != 4:
             raise ValueError("steps must have length 4")
         # hard safety clamp for direct manual commands
-        max_abs_steps = 500
+        max_abs_steps = int(self._cfg.motion.max_abs_steps_cmd)
+        if max_abs_steps <= 0:
+            raise ValueError("motion.max_abs_steps_cmd must be > 0")
         if any(abs(s) > max_abs_steps for s in steps):
             raise ValueError(
                 f"step command too large {steps}; max abs per axis is {max_abs_steps}"
@@ -231,7 +247,15 @@ class Stm32MotionBus(MotionBus):
 
     def wait_done(self, segment_id: SegmentId, timeout_s: float = 30.0) -> MotionState:
         deadline = time.monotonic() + timeout_s
+        next_hb_at = 0.0
         while time.monotonic() < deadline:
+            now = time.monotonic()
+            # Keep firmware watchdog satisfied while waiting for segment completion.
+            if now >= next_hb_at:
+                self._send_packet(
+                    PKT_HEARTBEAT, struct.pack("<I", int(time.time() * 1000) & 0xFFFFFFFF)
+                )
+                next_hb_at = now + 0.25
             self.pump(0.2)
             st = self._last_state
             if st.fault_code != 0:
@@ -245,6 +269,20 @@ class Stm32MotionBus(MotionBus):
         # best effort wait for fault/ack
         for _ in range(5):
             self.pump(0.2)
+
+    def reset_fault(self, timeout_s: float = 1.0) -> bool:
+        seq = self._send_packet(PKT_RESET_FAULT)
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            try:
+                pkt_type, rx_seq, payload = self._read_frame(0.25)
+            except TimeoutError:
+                continue
+            self._handle_packet(pkt_type, rx_seq, payload)
+            if pkt_type == PKT_FAULT and rx_seq == seq:
+                code = struct.unpack("<i", payload[:4])[0] if len(payload) >= 4 else -1
+                return code == 0
+        return False
 
     @property
     def state(self) -> MotionState:
