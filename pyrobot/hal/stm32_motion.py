@@ -77,11 +77,15 @@ class Stm32MotionBus(MotionBus):
             if b[0] == 0:
                 if not buf:
                     continue
+                frame = bytes(buf)
+                buf.clear()
                 try:
-                    raw = cobs_decode(bytes(buf))
+                    raw = cobs_decode(frame)
                     return parse_raw(raw)
-                finally:
-                    buf.clear()
+                except ValueError:
+                    # USB CDC can produce occasional partial/garbled frame boundaries.
+                    # Ignore bad frame and continue reading the stream.
+                    continue
             else:
                 buf.extend(b)
         raise TimeoutError("no uart frame")
