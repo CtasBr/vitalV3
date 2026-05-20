@@ -85,8 +85,10 @@ uv run robot-motion-cli state                     # CLI к motion backend из r
 python tools/generate_motion_limits_header.py     # синхронизировать limits в firmware из robot.yaml
 python -m pyrobot.hal.motion_cli enc-state        # реальные углы A/B с UART-энкодеров
 python -m pyrobot.hal.motion_cli zero-encoders    # зафиксировать текущую позу как home (90/90/0/0)
-python -m pyrobot.hal.encoder_daemon              # ZMQ-публикация углов A/B
-python tools/encoder_sub.py --count 5             # проверка топика encoders.state
+python -m pyrobot.hal.encoder_daemon              # T1: ZMQ encoders.state (владелец UART A/B)
+python -m pyrobot.hal.motion_daemon               # T2: ZMQ motion.state + STM32 (A/B из T1)
+python tools/encoder_sub.py --count 5             # проверка encoders.state
+python tools/motion_sub.py --count 5              # проверка motion.state (q_enc A/B из энкодеров)
 ```
 
 ---

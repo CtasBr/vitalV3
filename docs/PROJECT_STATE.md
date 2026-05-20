@@ -67,7 +67,7 @@ vitalV3/
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
 | **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ |
 | **1-M6** | Heartbeat + ESTOP + fault bit in telemetry (soft-limits позже) | 🔄 код; нужна проверка |
-| **2** | Python stm32 bridge + encoders ZMQ | 🔄 (`Stm32MotionBus`, `robot-motion-cli`, `robot-encoder-daemon`) |
+| **2** | Python HAL daemons (motion + encoders ZMQ) | 🔄 (`robot-encoder-daemon`, `robot-motion-daemon`, unified A/B) |
 | **3–7** | Vision, kinematics, skills, AI | ⏳ |
 
 ---
@@ -211,6 +211,22 @@ python3 tools/uart_pkt_estop.py       # M6 estop -> fault
   - `python -m pyrobot.hal.motion_cli enc-state` — только энкодеры A/B
   - `python -m pyrobot.hal.motion_cli zero-encoders` — калибровка нуля (AT+ZERO + offset, home 90/90)
 - ZMQ:
-  - `python -m pyrobot.hal.encoder_daemon` или `robot-encoder-daemon` — публикует `EncoderState` @ `encoders.poll_hz`
-  - `python tools/encoder_sub.py` — отладочный подписчик
+  - `robot-encoder-daemon` — единственный владелец UART энкодеров → `encoders.state`
+  - `robot-motion-daemon` — STM32 motion + подписка на `encoders.state` для A/B в `motion.state`
+  - `python tools/encoder_sub.py`, `python tools/motion_sub.py` — отладка
 - Offsets: `config/encoders_offsets.json` (в .gitignore), шаблон `config/encoders_offsets.json.example`
+
+### Запуск HAL (2 терминала + STM32 прошит)
+
+```bash
+# T1 — энкодеры (обязательно для motion_daemon A/B)
+python -m pyrobot.hal.encoder_daemon
+
+# T2 — motion (STM32 USB + ZMQ encoders)
+python -m pyrobot.hal.motion_daemon
+
+# T3 — смотреть состояние
+python tools/motion_sub.py --count 5
+```
+
+`motion_cli` по-прежнему работает напрямую (без ZMQ), открывая UART энкодеров сам.

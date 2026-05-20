@@ -10,6 +10,7 @@ from proto.motion import MotionState, MoveSegment, SegmentId
 from pyrobot.config.load_config import RobotConfig, load_config
 from pyrobot.hal.encoder_bus import ExternalEncoderBus
 from pyrobot.hal.encoder_offsets import load_offsets, save_offsets
+from pyrobot.hal.encoder_zmq import EncoderZmqClient
 from pyrobot.hal.motion_bus import MotionBus
 from pyrobot.hal.stm32_protocol import (
     PKT_ESTOP,
@@ -50,7 +51,13 @@ class Stm32MotionBus(MotionBus):
         self._fault_code = 0
         self._enc_offset_deg = load_offsets(self._cfg)
         self._q_enc_raw_deg = [90.0, 90.0, 0.0, 0.0]
+        self._last_pos_steps = [0, 0, 0, 0]
         self._encoder_bus: ExternalEncoderBus | None = None
+        self._encoder_zmq: EncoderZmqClient | None = None
+
+    def set_encoder_zmq(self, client: EncoderZmqClient) -> None:
+        """Use ZMQ encoders.state for A/B (from encoder_daemon). Does not open UART encoder ports."""
+        self._encoder_zmq = client
 
     def close(self) -> None:
         if self._encoder_bus is not None:
@@ -133,20 +140,45 @@ class Stm32MotionBus(MotionBus):
         return self._encoder_bus
 
     def read_encoder_ab_deg(self) -> tuple[float, float]:
-        """Read real A/B encoder angles (legacy transform, no offset)."""
+        """Read real A/B encoder angles (legacy transform, before file offset)."""
         return self._get_encoder_bus().read_ab()
 
-    def _q_enc_raw_from_steps(self, pos_steps: list[int]) -> list[float]:
-        deg_per_step = self._cfg.kinematics.deg_per_step
-        step_deg = [p * deg_per_step for p in pos_steps]
+    def _step_deg_from_pos(self, pos_steps: list[int]) -> list[float]:
+        dps = self._cfg.kinematics.deg_per_step
+        return [p * dps for p in pos_steps]
+
+    def _build_q_enc_deg(self, step_deg: list[float]) -> list[float]:
+        """
+        A/B: ZMQ EncoderState (already calibrated) if attached, else direct UART + offset.
+        C/D: STM32 step counters + offset from file.
+        """
+        cd = [
+            step_deg[2] + self._enc_offset_deg[2],
+            step_deg[3] + self._enc_offset_deg[3],
+        ]
+        if self._encoder_zmq is not None:
+            self._encoder_zmq.poll(timeout_ms=0)
+            ab = self._encoder_zmq.ab_deg()
+            if ab is not None:
+                self._q_enc_raw_deg = [ab[0], ab[1], step_deg[2], step_deg[3]]
+                return [ab[0], ab[1], cd[0], cd[1]]
         try:
             ab = self.read_encoder_ab_deg()
-            return [ab[0], ab[1], step_deg[2], step_deg[3]]
+            self._q_enc_raw_deg = [ab[0], ab[1], step_deg[2], step_deg[3]]
+            return [
+                ab[0] + self._enc_offset_deg[0],
+                ab[1] + self._enc_offset_deg[1],
+                cd[0],
+                cd[1],
+            ]
         except (RuntimeError, serial.SerialException, OSError):
-            return step_deg
-
-    def _apply_enc_offsets(self, q_raw: list[float]) -> list[float]:
-        return [q_raw[i] + self._enc_offset_deg[i] for i in range(4)]
+            self._q_enc_raw_deg = list(step_deg)
+            return [
+                step_deg[0] + self._enc_offset_deg[0],
+                step_deg[1] + self._enc_offset_deg[1],
+                cd[0],
+                cd[1],
+            ]
 
     def _handle_telemetry(self, payload: bytes) -> None:
         if len(payload) < 24:
@@ -157,8 +189,9 @@ class Stm32MotionBus(MotionBus):
         # Keep host-side fault state aligned with current telemetry.
         # Firmware currently reports latched fault in telemetry byte.
         self._fault_code = int(fault)
-        self._q_enc_raw_deg = self._q_enc_raw_from_steps(pos)
-        q_enc = self._apply_enc_offsets(self._q_enc_raw_deg)
+        self._last_pos_steps = pos
+        step_deg = self._step_deg_from_pos(pos)
+        q_enc = self._build_q_enc_deg(step_deg)
         in_motion = in_motion_mask != 0
         self._last_state = MotionState(
             node="stm32_motion",
@@ -335,13 +368,13 @@ class Stm32MotionBus(MotionBus):
         if hardware_zero:
             enc.hardware_zero()
 
-        # A/B: real UART encoders; C/D: STM32 step counters from latest telemetry.
+        # A/B: UART encoders (always direct for calibration, even when motion uses ZMQ).
         ab = enc.read_ab()
-        cd_raw = [self._q_enc_raw_deg[2], self._q_enc_raw_deg[3]]
+        cd_raw = self._step_deg_from_pos(self._last_pos_steps)
         self._q_enc_raw_deg = [ab[0], ab[1], cd_raw[0], cd_raw[1]]
         self._enc_offset_deg = [target_home[i] - self._q_enc_raw_deg[i] for i in range(4)]
         save_offsets(self._cfg, self._enc_offset_deg)
-        q_enc = self._apply_enc_offsets(self._q_enc_raw_deg)
+        q_enc = self._build_q_enc_deg(self._q_enc_raw_deg)
         self._last_state = self._last_state.model_copy(update={"q_enc_deg": q_enc})
         return {
             "hardware_zero": hardware_zero,
@@ -354,15 +387,9 @@ class Stm32MotionBus(MotionBus):
     @property
     def state(self) -> MotionState:
         self.pump(0.01)
-        # Refresh A/B from encoders even if no telemetry frame arrived.
-        try:
-            ab = self.read_encoder_ab_deg()
-            self._q_enc_raw_deg[0] = ab[0]
-            self._q_enc_raw_deg[1] = ab[1]
-            self._last_state = self._last_state.model_copy(
-                update={"q_enc_deg": self._apply_enc_offsets(self._q_enc_raw_deg)}
-            )
-        except (RuntimeError, serial.SerialException, OSError):
-            pass
+        step_deg = list(self._q_enc_raw_deg)
+        if len(step_deg) == 4:
+            q_enc = self._build_q_enc_deg(step_deg)
+            self._last_state = self._last_state.model_copy(update={"q_enc_deg": q_enc})
         return self._last_state
 
