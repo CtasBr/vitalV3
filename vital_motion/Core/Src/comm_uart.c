@@ -1,6 +1,6 @@
 /**
  * @file comm_uart.c
- * @brief M2–M4: текст (PING, STEP) + бинарные пакеты COBS/CRC.
+ * @brief M2–M5: текст (PING, STEP) + бинарные пакеты COBS/CRC.
  */
 #include "comm_uart.h"
 #include "board_config.h"
@@ -56,11 +56,14 @@ static void comm_uart_send_pong(uint16_t seq)
   comm_uart_send_raw_cobs(&pkt);
 }
 
-static void comm_uart_send_segment_done(uint16_t seq, int32_t done_steps)
+static void comm_uart_send_segment_done(uint16_t seq, const int32_t done_steps[4])
 {
-  uint8_t payload[4];
+  uint8_t payload[16];
   pkt_raw_t pkt;
-  memcpy(payload, &done_steps, sizeof(done_steps));
+  memcpy(&payload[0], &done_steps[0], sizeof(done_steps[0]));
+  memcpy(&payload[4], &done_steps[1], sizeof(done_steps[1]));
+  memcpy(&payload[8], &done_steps[2], sizeof(done_steps[2]));
+  memcpy(&payload[12], &done_steps[3], sizeof(done_steps[3]));
   if (protocol_build(&pkt, PKT_SEGMENT_DONE, seq, payload, sizeof(payload)) != 0)
   {
     return;
@@ -85,19 +88,30 @@ static void comm_uart_send_fault(uint16_t seq, int32_t code)
 
 static void comm_uart_send_telemetry(void)
 {
-  uint8_t payload[12];
+  uint8_t payload[24];
   pkt_raw_t pkt;
-  int32_t pos = motor_axis_a_pos_steps();
-  uint8_t in_motion = motor_axis_a_in_motion();
+  int32_t pos[4] = {
+      motor_axis_pos_steps(0),
+      motor_axis_pos_steps(1),
+      motor_axis_pos_steps(2),
+      motor_axis_pos_steps(3),
+  };
+  uint8_t in_motion_mask = (motor_axis_in_motion(0) ? 0x1U : 0U) |
+                           (motor_axis_in_motion(1) ? 0x2U : 0U) |
+                           (motor_axis_in_motion(2) ? 0x4U : 0U) |
+                           (motor_axis_in_motion(3) ? 0x8U : 0U);
   uint8_t fault = 0;
   uint16_t reserved = 0;
-  int32_t done = 0;
+  int32_t done = 0; /* reserved */
 
-  memcpy(&payload[0], &pos, sizeof(pos));
-  payload[4] = in_motion;
-  payload[5] = fault;
-  memcpy(&payload[6], &reserved, sizeof(reserved));
-  memcpy(&payload[8], &done, sizeof(done));
+  memcpy(&payload[0], &pos[0], sizeof(pos[0]));
+  memcpy(&payload[4], &pos[1], sizeof(pos[1]));
+  memcpy(&payload[8], &pos[2], sizeof(pos[2]));
+  memcpy(&payload[12], &pos[3], sizeof(pos[3]));
+  payload[16] = in_motion_mask;
+  payload[17] = fault;
+  memcpy(&payload[18], &reserved, sizeof(reserved));
+  memcpy(&payload[20], &done, sizeof(done));
 
   g_tx_seq++;
   if (protocol_build(&pkt, PKT_TELEMETRY, g_tx_seq, payload, sizeof(payload)) != 0)
@@ -133,24 +147,20 @@ static void comm_uart_handle_binary(const pkt_raw_t *pkt)
       return;
     }
 
-    int32_t steps_a = 0, steps_b = 0, steps_c = 0, steps_d = 0;
-    uint32_t arr = 5000U;
-    memcpy(&steps_a, &pkt->payload[0], sizeof(steps_a));
-    memcpy(&steps_b, &pkt->payload[4], sizeof(steps_b));
-    memcpy(&steps_c, &pkt->payload[8], sizeof(steps_c));
-    memcpy(&steps_d, &pkt->payload[12], sizeof(steps_d));
-    memcpy(&arr, &pkt->payload[16], sizeof(arr));
+    int32_t steps[4] = {0, 0, 0, 0};
+    uint32_t arr[4] = {5000U, 5000U, 5000U, 5000U};
+    memcpy(&steps[0], &pkt->payload[0], sizeof(steps[0]));
+    memcpy(&steps[1], &pkt->payload[4], sizeof(steps[1]));
+    memcpy(&steps[2], &pkt->payload[8], sizeof(steps[2]));
+    memcpy(&steps[3], &pkt->payload[12], sizeof(steps[3]));
+    memcpy(&arr[0], &pkt->payload[16], sizeof(arr[0]));
+    memcpy(&arr[1], &pkt->payload[20], sizeof(arr[1]));
+    memcpy(&arr[2], &pkt->payload[24], sizeof(arr[2]));
+    memcpy(&arr[3], &pkt->payload[28], sizeof(arr[3]));
 
-    /* M5-stage: implemented physically only for axis A; require B/C/D to be 0. */
-    if ((steps_b != 0) || (steps_c != 0) || (steps_d != 0))
+    if (motor_move_4axes(steps, arr) == 0)
     {
-      comm_uart_send_fault(pkt->seq, -1002);
-      return;
-    }
-
-    if (motor_axis_a_move(steps_a, arr) == 0)
-    {
-      comm_uart_send_segment_done(pkt->seq, steps_a);
+      comm_uart_send_segment_done(pkt->seq, steps);
     }
     else
     {
@@ -203,7 +213,9 @@ static void comm_uart_handle_line(const char *line)
     }
 
     comm_uart_tx_str("RUN STEP...\r\n");
-    const int rc = motor_axis_a_move((int32_t)steps, (uint32_t)arr);
+    const int32_t steps4[4] = {(int32_t)steps, 0, 0, 0};
+    const uint32_t arr4[4] = {(uint32_t)arr, 5000U, 5000U, 5000U};
+    const int rc = motor_move_4axes(steps4, arr4);
     if (rc == 0)
     {
       comm_uart_tx_str("OK STEP\r\n");

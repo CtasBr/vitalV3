@@ -735,9 +735,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-  else if (htim->Instance == TIM1)
+  else if (htim->Instance == TIM1 || htim->Instance == TIM2 || htim->Instance == TIM3 ||
+           htim->Instance == TIM4)
   {
-    motor_tim1_period_elapsed();
+    motor_tim_period_elapsed(htim);
   }
   /* USER CODE END Callback 1 */
 }

@@ -51,14 +51,14 @@ Text commands (`PING`, `STEP`) remain for bring-up until M5.
 MCU executes `motor_axis_a_move(steps_a, arr_a)` and replies:
 
 - `PKT_SEGMENT_DONE` with same `seq`
-- payload 4 bytes: `done_steps` (int32)
+- payload 16 bytes: `done_steps_a/b/c/d` (int32 ×4)
 
 Current firmware stage:
 
-- validates that `steps_b/c/d == 0` (otherwise sends `PKT_FAULT` code `-1002`)
+- executes all 4 axes (TIM1..TIM4) in parallel
 - supports `PKT_TELEMETRY` every ~100 ms, payload:
-  - `[0..3] int32 pos_a_steps`
-  - `[4] uint8 in_motion`
-  - `[5] uint8 fault`
-  - `[6..7] reserved`
-  - `[8..11] int32 done_reserved`
+  - `[0..15] int32 pos_steps_a/b/c/d`
+  - `[16] uint8 in_motion_mask` (bit0..bit3 => A..D)
+  - `[17] uint8 fault`
+  - `[18..19] reserved`
+  - `[20..23] int32 done_reserved`

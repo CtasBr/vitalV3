@@ -1,6 +1,6 @@
 /**
  * @file motor.h
- * @brief M3: ось A (TIM1 / PE9 STEP, PF0 DIR).
+ * @brief M5: шаговый драйвер 4 осей (TIM1..4 + DIR PF0..PF3).
  */
 #ifndef MOTOR_H
 #define MOTOR_H
@@ -10,23 +10,25 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include "stm32f4xx_hal.h"
 
 void motor_init(void);
 
 /**
- * @brief Шаги оси A (знак = направление).
- * @param steps  >0 / <0
- * @param tim_arr  период TIM1 (ARR), больше = медленнее; типично 3000–8000
+ * @brief Движение 4 осей одновременно.
+ * @param steps[4] знаковые шаги A/B/C/D
+ * @param tim_arr[4] ARR таймеров A/B/C/D (меньше = быстрее)
  * @return 0 OK, -1 timeout
  */
-int motor_axis_a_move(int32_t steps, uint32_t tim_arr);
+int motor_move_4axes(const int32_t steps[4], const uint32_t tim_arr[4]);
 
-/** Вызывать из HAL_TIM_PeriodElapsedCallback при TIM1. */
-void motor_tim1_period_elapsed(void);
+/** Вызывать из HAL_TIM_PeriodElapsedCallback для TIM1..TIM4. */
+void motor_tim_period_elapsed(TIM_HandleTypeDef *htim);
 
 /** Telemetry helpers. */
-int32_t motor_axis_a_pos_steps(void);
-uint8_t motor_axis_a_in_motion(void);
+int32_t motor_axis_pos_steps(uint8_t axis);
+uint8_t motor_axis_in_motion(uint8_t axis);
+uint8_t motor_any_in_motion(void);
 
 #ifdef __cplusplus
 }

@@ -65,7 +65,7 @@ vitalV3/
 | **1-M2** | UART echo, `PING`→`PONG` | ✅ |
 | **1-M3** | Ось A: `STEP n [arr]`, TIM1 | ✅ **проверено пользователем** |
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
-| **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), A-axis exec, SEGMENT_DONE/FAULT | 🔄 код; нужна проверка |
+| **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ код; нужна проверка на железе |
 | **1-M6** | Heartbeat, ESTOP, soft limits | ⏳ |
 | **2** | Python motion_bridge + SHM camera | ⏳ |
 | **3–7** | Vision, kinematics, skills, AI | ⏳ |
@@ -78,7 +78,7 @@ vitalV3/
 |------|------|
 | `main.c` | init, FreeRTOS tasks, `HAL_TIM_PeriodElapsedCallback` → TIM7 tick + TIM1 motor |
 | `comm_uart.c` | Текст + PKT (`PING/PONG`, `MOVE_SEGMENT`, `SEGMENT_DONE`, `FAULT`, `TELEMETRY`) |
-| `motor.c` | `motor_axis_a_move(steps, tim_arr)` — TIM1 PWM |
+| `motor.c` | `motor_move_4axes(steps[4], arr[4])` — TIM1..TIM4 PWM |
 | `board_config.h` | USART3 vs USART2 |
 | `protocol.c` | M4: COBS, CRC16, `PKT_PING`→`PKT_PONG` |
 | `BRINGUP.md` | Пошаговая инструкция |

@@ -119,8 +119,14 @@ def parse_raw(raw: bytes) -> tuple[int, int, bytes]:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("steps", type=int)
-    p.add_argument("arr", type=int, nargs="?", default=5000)
+    p.add_argument("steps_a", type=int)
+    p.add_argument("arr_a", type=int, nargs="?", default=5000)
+    p.add_argument("--steps-b", type=int, default=0)
+    p.add_argument("--steps-c", type=int, default=0)
+    p.add_argument("--steps-d", type=int, default=0)
+    p.add_argument("--arr-b", type=int, default=5000)
+    p.add_argument("--arr-c", type=int, default=5000)
+    p.add_argument("--arr-d", type=int, default=5000)
     p.add_argument("port", nargs="?", help="/dev/cu.usbmodem...")
     p.add_argument("-b", "--baud", type=int, default=115200)
     p.add_argument("--seq", type=int, default=100)
@@ -137,14 +143,14 @@ def main() -> None:
     # 4-axis payload (B/C/D = 0 for current firmware stage)
     payload = struct.pack(
         "<iiiiIIII",
-        args.steps,
-        0,
-        0,
-        0,
-        args.arr,
-        5000,
-        5000,
-        5000,
+        args.steps_a,
+        args.steps_b,
+        args.steps_c,
+        args.steps_d,
+        args.arr_a,
+        args.arr_b,
+        args.arr_c,
+        args.arr_d,
     )
     raw = build_raw(PKT_MOVE_SEGMENT, seq=args.seq, payload=payload)
     wire = cobs_encode(raw)
@@ -155,7 +161,11 @@ def main() -> None:
         ser.reset_input_buffer()
         ser.write(wire)
         ser.flush()
-        print(f"Sent PKT_MOVE_SEGMENT seq={args.seq}, steps={args.steps}, arr={args.arr}")
+        print(
+            f"Sent PKT_MOVE_SEGMENT seq={args.seq}, "
+            f"steps=[{args.steps_a},{args.steps_b},{args.steps_c},{args.steps_d}], "
+            f"arr=[{args.arr_a},{args.arr_b},{args.arr_c},{args.arr_d}]"
+        )
 
         deadline = time.time() + 35.0
         while time.time() < deadline:
@@ -184,8 +194,8 @@ def main() -> None:
             if seq != args.seq:
                 print(f"skip done with seq={seq}")
                 continue
-            done_steps = struct.unpack("<i", payload_rx[:4])[0] if len(payload_rx) >= 4 else 0
-            print(f"OK: PKT_SEGMENT_DONE seq={seq}, done_steps={done_steps}")
+            done = struct.unpack("<iiii", payload_rx[:16]) if len(payload_rx) >= 16 else (0, 0, 0, 0)
+            print(f"OK: PKT_SEGMENT_DONE seq={seq}, done_steps={list(done)}")
             return
 
     print("FAIL: no PKT_SEGMENT_DONE", file=sys.stderr)
