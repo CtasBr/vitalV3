@@ -10,6 +10,11 @@ def test_parse_angle_missing() -> None:
     assert parse_angle("no angle here") is None
 
 
+def test_parse_angle_after_ok_line() -> None:
+    assert parse_angle("OK\r\n") is None
+    assert parse_angle("OK\r\nAngle:6.286\r\n") == 6.286
+
+
 def test_transform_legacy_ab_home_like() -> None:
     # Values that map to home-ish frame after legacy transform.
     a, b = transform_legacy_ab(0.0, 0.0)

@@ -56,6 +56,7 @@ def main() -> None:
 
     running = True
     enc_warned = False
+    enc_ready = False
 
     def _stop(*_args: object) -> None:
         nonlocal running
@@ -76,9 +77,17 @@ def main() -> None:
     try:
         while running:
             enc_zmq.poll(timeout_ms=0)
-            if enc_zmq.ab_deg() is None and not enc_warned:
-                log.warning("no_encoder_zmq_yet", hint="start: python -m pyrobot.hal.encoder_daemon")
-                enc_warned = True
+            if enc_zmq.ab_deg() is None:
+                if not enc_warned:
+                    log.warning(
+                        "no_encoder_zmq_yet",
+                        hint="start first: python -m pyrobot.hal.encoder_daemon",
+                    )
+                    enc_warned = True
+            elif not enc_ready:
+                ab = enc_zmq.ab_deg()
+                log.info("encoder_zmq_ready", a_deg=ab[0], b_deg=ab[1])
+                enc_ready = True
 
             if isinstance(bus, Stm32MotionBus):
                 bus.pump(0)
