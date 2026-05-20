@@ -138,39 +138,46 @@ def main() -> None:
     with serial.Serial(port, args.baud, timeout=0.5) as ser:
         time.sleep(0.2)
         ser.reset_input_buffer()
-        raw = build_raw(PKT_PING, seq=42)
-        wire = cobs_encode(raw)
-        ser.write(wire)
-        ser.flush()
-        print(f"Sent PKT_PING seq=42 ({len(wire)} COBS bytes)", flush=True)
-        deadline = time.time() + 3.0
-        while time.time() < deadline:
-            try:
-                reply = read_cobs_frame(ser, timeout=1.0)
-            except TimeoutError:
-                continue
 
-            try:
-                ptype, seq = parse_raw(reply)
-            except ValueError as exc:
-                print(f"skip frame: {exc}", flush=True)
-                continue
+        max_attempts = 3
+        seq = 42
+        for attempt in range(1, max_attempts + 1):
+            raw = build_raw(PKT_PING, seq=seq)
+            wire = cobs_encode(raw)
+            ser.write(wire)
+            ser.flush()
+            print(
+                f"Sent PKT_PING seq={seq} ({len(wire)} COBS bytes), attempt {attempt}/{max_attempts}",
+                flush=True,
+            )
 
-            if ptype == PKT_TELEMETRY:
-                continue
+            deadline = time.time() + 1.2
+            while time.time() < deadline:
+                try:
+                    reply = read_cobs_frame(ser, timeout=0.4)
+                except TimeoutError:
+                    continue
 
-            if ptype == PKT_PING:
-                print("skip echoed PKT_PING", flush=True)
-                continue
+                try:
+                    ptype, rx_seq = parse_raw(reply)
+                except ValueError as exc:
+                    print(f"skip frame: {exc}", flush=True)
+                    continue
 
-            if ptype != PKT_PONG or seq != 42:
-                print(f"FAIL: type={ptype:#x} seq={seq}", file=sys.stderr)
-                raise SystemExit(1)
+                if ptype == PKT_TELEMETRY:
+                    continue
+                if ptype == PKT_PING:
+                    print("skip echoed PKT_PING", flush=True)
+                    continue
+                if ptype == PKT_PONG and rx_seq == seq:
+                    print(f"OK: PKT_PONG seq={rx_seq}")
+                    return
 
-            print(f"OK: PKT_PONG seq={seq}")
-            return
+                print(f"skip frame: type={ptype:#x} seq={rx_seq}", flush=True)
 
-        print("FAIL: no PKT_PONG (M4 firmware? close screen? right port?)", file=sys.stderr)
+            seq += 1
+
+        print("FAIL: no PKT_PONG after retries (port busy/noise?)", file=sys.stderr)
         raise SystemExit(1)
 
 
