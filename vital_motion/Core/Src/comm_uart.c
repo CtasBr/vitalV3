@@ -174,6 +174,7 @@ static void comm_uart_handle_binary(const pkt_raw_t *pkt)
   if (pkt->type == (uint8_t)PKT_RESET_FAULT)
   {
     g_fault_code = 0;
+    g_last_hb_ms = HAL_GetTick();
     comm_uart_send_fault(pkt->seq, 0);
     return;
   }

@@ -67,8 +67,10 @@ vitalV3/
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
 | **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ |
 | **1-M6** | Heartbeat + ESTOP + fault bit in telemetry (soft-limits позже) | 🔄 код; нужна проверка |
-| **2** | Python HAL daemons (motion + encoders ZMQ) | 🔄 (`robot-encoder-daemon`, `robot-motion-daemon`, unified A/B) |
-| **3–7** | Vision, kinematics, skills, AI | ⏳ |
+| **2** | Python HAL daemons (motion + encoders ZMQ) | ✅ проверено на железе |
+| **3** | Кинематика + planner + G28/G0/G1 | 🔄 код; проверка на роботе |
+| **3b** | G28 (home), G-code G0/G1 → `MotionCommand` | 🔄 в **3** |
+| **4–7** | Vision, skills, state machine, Web UI, AI | ⏳ |
 
 ---
 
@@ -132,12 +134,28 @@ Added `create_motion_bus()` and CLI entrypoint `robot-motion-cli`.
 
 ---
 
-## Кинематика (из legacy, для `pyrobot/kinematics/`)
+## Кинематика + motion planner (этап 3)
 
-- `la = lb = 250` mm
-- Cartesian → углы: `l`, `b = acos(1-l²/(2la·lb))`, `a`, `c = atan(y/x)`
-- `deg_per_step = 360/(200·16·6)`
-- Home: (250, 0, 250), углы 90/90/0
+| Модуль | Роль |
+|--------|------|
+| `pyrobot/kinematics/inverse.py` | pose → углы A/B/C (`pose_to_joint_deg`) |
+| `pyrobot/kinematics/forward.py` | углы → pose (round-trip тесты) |
+| `pyrobot/motion/planner.py` | joint delta → steps (связка B+A), периоды по F |
+| `pyrobot/behaviour/gcode.py` | G0/G1/G28 → `MotionCommand` |
+| `Stm32MotionBus` | `move_to_pose_mm`, `home` (G28), `move_joints` в **градусах** |
+
+**G-code (тонкий адаптер, не язык поведения):**
+
+| Команда | `MotionCommand` / CLI |
+|---------|------------------------|
+| G28 | `kind=home` / `g28`, `motion_cli g28` |
+| G0 | `linear_move` + `rapid=true` / `motion_cli g0 X Y Z` |
+| G1 | `linear_move` + `feed_mm_min` / `motion_cli g1 X Y Z --f 300` |
+| строка | `kind=gcode`, `gcode_line=...` / `motion_cli gcode "G1 X..."` |
+
+Формулы: `la = lb = 250` mm, `deg_per_step = 360/(200·16·6)`, home pose (250,0,250) ↔ 90/90/0.
+
+**Дальше в плане (после проверки на железе):** multi-segment planner, encoder fusion перед отправкой, Jacobian для vision.
 
 ---
 
@@ -183,11 +201,12 @@ python3 tools/uart_pkt_estop.py       # M6 estop -> fault
 
 ---
 
-## Следующая работа (M5 → M6)
+## Следующая работа
 
-1. Host-side telemetry viewer / logger
-2. Привязать soft-limits к `config/robot.yaml` (сейчас в firmware константы +/-4800 шагов)
-3. После M6: `pyrobot/hal/stm32_bridge.py` + `motion.backend: stm32`
+1. **Этап 3 на железе:** `encoder_daemon` + `motion_daemon`, затем `motion_cli g28`, `g1 260 0 240 --f 300`
+2. ZMQ-клиент для skills: отправка `MotionCommand(linear_move|home|gcode)` в `motion.cmd`
+3. Этап 4: vision nodes (camera, ToF)
+4. Multi-segment траектории, closed-loop коррекция по энкодерам (см. README)
 
 ---
 
@@ -197,6 +216,7 @@ python3 tools/uart_pkt_estop.py       # M6 estop -> fault
 - Добавлен `PKT_RESET_FAULT` (`0x32`) host→mcu; MCU отвечает `PKT_FAULT(0)` при успешном сбросе.
 - Добавлены firmware soft-limits по каждой оси: значения берутся из `config/robot.yaml` (`motion.soft_limits_steps`) через `tools/generate_motion_limits_header.py` -> `vital_motion/Core/Inc/motion_limits.h`.
 - `robot-motion-cli` поддерживает `reset-fault`.
+- **fault_code=3** = heartbeat watchdog: `motion_daemon` шлёт HB @ `heartbeat_hz`; без этого через ~1 с MCU в fault.
 
 ---
 
@@ -230,3 +250,16 @@ python tools/motion_sub.py --count 5
 ```
 
 `motion_cli` по-прежнему работает напрямую (без ZMQ), открывая UART энкодеров сам.
+
+**Новые команды motion_cli (этап 3):**
+
+При запущенном `motion_daemon` команды **по умолчанию идут через ZMQ** (UART не открывается повторно). Прямой UART: `--direct` (сначала остановить daemon).
+
+```bash
+# T1 encoder_daemon, T2 motion_daemon, T3:
+python -m pyrobot.hal.motion_cli g28
+python -m pyrobot.hal.motion_cli g1 260 0 240 --f 300
+python -m pyrobot.hal.motion_cli state
+# без daemon:
+python -m pyrobot.hal.motion_cli --direct ping
+```

@@ -69,3 +69,15 @@ Current firmware stage:
 - enforces soft-limits in MCU step-space before move:
   - per axis target must stay in [-4800, +4800] steps
   - on violation MCU returns `PKT_FAULT(-1004)` and latches `fault_code=4`
+
+## Telemetry `fault` byte (latched)
+
+| Code | Meaning |
+|------|---------|
+| `0` | OK |
+| `1` | ESTOP |
+| `2` | move timeout / motor busy |
+| `3` | **heartbeat watchdog** — no `PKT_HEARTBEAT` from host for >1 s after first HB |
+| `4` | soft limit violation |
+
+Host `motion_daemon` must send heartbeat at `motion.heartbeat_hz` (default 10 Hz). Clear with `PKT_RESET_FAULT` / `motion_cli reset-fault`.

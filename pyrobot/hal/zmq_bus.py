@@ -36,9 +36,11 @@ class ZmqPublisher:
 
 
 class ZmqSubscriber:
-    def __init__(self, ctx: zmq.Context, uri: str, topic: str = "") -> None:
+    def __init__(self, ctx: zmq.Context, uri: str, topic: str = "", *, conflate: bool = False) -> None:
         self._socket = ctx.socket(zmq.SUB)
         self._socket.connect(uri)
+        if conflate:
+            self._socket.setsockopt(zmq.CONFLATE, 1)
         if topic:
             self._socket.setsockopt(zmq.SUBSCRIBE, topic.encode())
         else:

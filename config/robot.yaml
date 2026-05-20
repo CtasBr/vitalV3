@@ -23,6 +23,12 @@ motion:
   heartbeat_hz: 10
   watchdog_ms: 200
   max_abs_steps_cmd: 4000  # host-side per-axis clamp for manual move-steps
+  # Знак шагов vs рост угла энкодера (A инвертирована на MCU; B — на проводке)
+  step_sign:
+    a: 1
+    b: -1
+    c: 1
+    d: 1
   soft_limits_steps:
     a: [-4800, 4800]
     b: [-4800, 4800]

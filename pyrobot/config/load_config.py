@@ -46,6 +46,14 @@ class MotionConfig(BaseModel):
             "d": (-4800, 4800),
         }
     )
+    # +1 / -1 per axis: match motor DIR to joint +angle (encoder frame)
+    step_sign: dict[str, int] = Field(
+        default_factory=lambda: {"a": 1, "b": 1, "c": 1, "d": 1}
+    )
+
+    def step_sign_list(self) -> list[int]:
+        keys = ("a", "b", "c", "d")
+        return [int(self.step_sign.get(k, 1)) for k in keys]
 
 
 class EncodersConfig(BaseModel):

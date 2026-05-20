@@ -21,14 +21,26 @@ class MoveSegment(BaseModel):
 class MotionCommand(SchemaHeader):
     """Host → motion bridge."""
 
-    kind: Literal["move_joints", "stream_segment", "estop", "home", "reset_fault"] = "move_joints"
+    kind: Literal[
+        "move_joints",
+        "linear_move",
+        "stream_segment",
+        "estop",
+        "home",
+        "g28",
+        "gcode",
+        "reset_fault",
+    ] = "move_joints"
     target_q_deg: list[float] | None = Field(default=None, min_length=4, max_length=4)
     target_pose_mm: list[float] | None = Field(
         default=None,
-        description="[x, y, z] in base frame",
+        description="[x, y, z] in base frame (G0/G1 linear_move)",
         min_length=3,
         max_length=3,
     )
+    feed_mm_min: float = Field(default=300.0, description="G1 feed F (mm/min); G0 uses rapid default")
+    rapid: bool = Field(default=False, description="G0 rapid move (higher default feed)")
+    gcode_line: str | None = Field(default=None, description="Single G-code line for kind=gcode")
     max_vel_mm_s: float = 50.0
     max_acc_mm_s2: float = 200.0
     segment: MoveSegment | None = None

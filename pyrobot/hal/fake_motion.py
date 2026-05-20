@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from proto.motion import MotionState, MoveSegment, SegmentId
 from pyrobot.config.load_config import RobotConfig, load_config
 from pyrobot.hal.motion_bus import MotionBus
+from pyrobot.kinematics.inverse import pose_to_joint_deg
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -129,8 +130,25 @@ class FakeMotionBus(MotionBus):
                 fault_message="estop" if self._fault_code else "",
             )
 
-    def home(self) -> SegmentId:
-        return self.move_joints([90.0, 90.0, 0.0, 0.0])
+    def home(self, feed_mm_min: float = 300.0) -> SegmentId:
+        del feed_mm_min
+        return self.move_joints(list(self._cfg.encoders.home_deg))
+
+    def move_to_pose_mm(
+        self,
+        pose_mm: list[float],
+        q_current_deg: list[float] | None = None,
+        *,
+        feed_mm_min: float = 300.0,
+        rapid: bool = False,
+        d_target_deg: float | None = None,
+    ) -> SegmentId:
+        del feed_mm_min, rapid, q_current_deg
+        link = self._cfg.kinematics.link_length_mm
+        joints = pose_to_joint_deg(pose_mm[0], pose_mm[1], pose_mm[2], link_length_mm=link)
+        with self._lock:
+            d = self._q[3] if d_target_deg is None else d_target_deg
+        return self.move_joints([joints.a, joints.b, joints.c, d])
 
     def shutdown(self) -> None:
         self._stop.set()

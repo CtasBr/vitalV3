@@ -11,7 +11,15 @@ from pyrobot.config.load_config import RobotConfig, load_config
 from pyrobot.hal.encoder_bus import ExternalEncoderBus
 from pyrobot.hal.encoder_offsets import load_offsets, save_offsets
 from pyrobot.hal.encoder_zmq import EncoderZmqClient
+from pyrobot.hal.fault_codes import mcu_fault_message
 from pyrobot.hal.motion_bus import MotionBus
+from pyrobot.kinematics.forward import joint_deg_to_pose
+from pyrobot.motion.planner import (
+    feed_for_linear,
+    plan_home_move,
+    plan_joint_move,
+    plan_pose_move,
+)
 from pyrobot.hal.stm32_protocol import (
     PKT_ESTOP,
     PKT_FAULT,
@@ -126,7 +134,7 @@ class Stm32MotionBus(MotionBus):
             self._last_state = self._last_state.model_copy(
                 update={
                     "fault_code": code,
-                    "fault_message": "mcu_fault" if code else "",
+                    "fault_message": mcu_fault_message(code),
                     "in_motion": False,
                 }
             )
@@ -202,15 +210,20 @@ class Stm32MotionBus(MotionBus):
             segment_id_active=self._last_state.segment_id_active,
             segment_id_done=self._last_state.segment_id_done,
             fault_code=self._fault_code,
-            fault_message="mcu_fault" if self._fault_code else "",
+            fault_message=mcu_fault_message(self._fault_code),
         )
 
     def pump(self, timeout_s: float = 0.02) -> None:
-        try:
-            pkt_type, seq, payload = self._read_frame(timeout_s)
-        except TimeoutError:
-            return
-        self._handle_packet(pkt_type, seq, payload)
+        """Drain all pending COBS frames (telemetry, SEGMENT_DONE, HB echo, …)."""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._ser.in_waiting == 0:
+                break
+            try:
+                pkt_type, seq, payload = self._read_frame(0.003)
+            except TimeoutError:
+                break
+            self._handle_packet(pkt_type, seq, payload)
 
     def ping(self, timeout_s: float = 2.0) -> bool:
         deadline = time.monotonic() + timeout_s
@@ -227,6 +240,13 @@ class Stm32MotionBus(MotionBus):
                 if pkt_type == PKT_PONG and rx_seq == seq:
                     return True
         return False
+
+    def tick_heartbeat(self) -> None:
+        """Send heartbeat without blocking (motion_daemon watchdog keepalive)."""
+        self._send_packet(
+            PKT_HEARTBEAT,
+            struct.pack("<I", int(time.time() * 1000) & 0xFFFFFFFF),
+        )
 
     def send_heartbeat(self, timeout_s: float = 1.0) -> bool:
         seq = self._send_packet(PKT_HEARTBEAT, struct.pack("<I", int(time.time() * 1000) & 0xFFFFFFFF))
@@ -248,11 +268,63 @@ class Stm32MotionBus(MotionBus):
         amax_deg_s2: float = 90.0,
     ) -> SegmentId:
         del vmax_deg_s, amax_deg_s2
-        # Safety-first transitional behavior:
-        # at current firmware stage we treat move_joints input as step deltas (not degrees).
-        # Proper IK/planner->segments path will replace this.
-        steps = [int(round(v)) for v in q_deg]
-        return self.move_steps(steps)
+        return self.move_to_joints_deg(q_deg)
+
+    def move_to_joints_deg(
+        self,
+        q_target_deg: list[float],
+        q_current_deg: list[float] | None = None,
+        *,
+        feed_mm_min: float = 300.0,
+        cartesian_delta_mm: tuple[float, float, float] | None = None,
+    ) -> SegmentId:
+        """Absolute joint targets (deg); planner converts to steps + periods."""
+        q_cur = list(q_current_deg if q_current_deg is not None else self.state.q_enc_deg)
+        seg = plan_joint_move(
+            list(q_target_deg),
+            q_cur,
+            self._cfg.kinematics,
+            cartesian_delta_mm=cartesian_delta_mm,
+            feed_mm_min=feed_mm_min,
+        )
+        return self.move_steps(seg.axis_steps, seg.period_us)
+
+    def move_to_pose_mm(
+        self,
+        pose_mm: list[float],
+        q_current_deg: list[float] | None = None,
+        *,
+        feed_mm_min: float = 300.0,
+        rapid: bool = False,
+        d_target_deg: float | None = None,
+    ) -> SegmentId:
+        """G0/G1: Cartesian target -> joint IK -> one MOVE_SEGMENT."""
+        q_cur = list(q_current_deg if q_current_deg is not None else self.state.q_enc_deg)
+        feed = feed_for_linear(rapid=rapid, feed_mm_min=feed_mm_min)
+        seg = plan_pose_move(
+            pose_mm,
+            q_cur,
+            self._cfg.kinematics,
+            feed_mm_min=feed,
+            d_target_deg=d_target_deg,
+        )
+        return self.move_steps(seg.axis_steps, seg.period_us)
+
+    def home(self, feed_mm_min: float = 300.0) -> SegmentId:
+        """G28: move to encoders.home_deg (default 90/90/0/0)."""
+        q_cur = list(self.state.q_enc_deg)
+        seg = plan_home_move(q_cur, self._cfg, feed_mm_min=feed_mm_min)
+        return self.move_steps(seg.axis_steps, seg.period_us)
+
+    def current_pose_mm(self) -> list[float]:
+        q = self.state.q_enc_deg
+        pose = joint_deg_to_pose(
+            q[0],
+            q[1],
+            q[2],
+            link_length_mm=self._cfg.kinematics.link_length_mm,
+        )
+        return [pose.x, pose.y, pose.z]
 
     def move_steps(self, steps: list[int], arr: list[int] | None = None) -> SegmentId:
         if len(steps) != 4:
@@ -261,14 +333,20 @@ class Stm32MotionBus(MotionBus):
         max_abs_steps = int(self._cfg.motion.max_abs_steps_cmd)
         if max_abs_steps <= 0:
             raise ValueError("motion.max_abs_steps_cmd must be > 0")
-        if any(abs(s) > max_abs_steps for s in steps):
-            raise ValueError(
-                f"step command too large {steps}; max abs per axis is {max_abs_steps}"
-            )
         if arr is None:
             arr = [5000, 5000, 5000, 5000]
         if len(arr) != 4:
             raise ValueError("arr must have length 4")
+
+        signs = self._cfg.motion.step_sign_list()
+        steps = [signs[i] * steps[i] for i in range(4)]
+        if any(abs(s) > max_abs_steps for s in steps):
+            raise ValueError(
+                f"step command too large {steps}; max abs per axis is {max_abs_steps}"
+            )
+
+        if all(s == 0 for s in steps):
+            return 0
 
         payload = struct.pack(
             "<iiiiIIII",
@@ -282,8 +360,8 @@ class Stm32MotionBus(MotionBus):
             arr[3],
         )
         seg_id = self._send_packet(PKT_MOVE_SEGMENT, payload)
-        deg_per_step = self._cfg.kinematics.deg_per_step
-        q_cmd = [s * deg_per_step for s in steps]
+        q_cur = list(self.state.q_enc_deg)
+        q_cmd = [q_cur[i] + steps[i] * self._cfg.kinematics.deg_per_step for i in range(4)]
         self._last_state = self._last_state.model_copy(
             update={"segment_id_active": seg_id, "in_motion": True, "q_cmd_deg": q_cmd}
         )
