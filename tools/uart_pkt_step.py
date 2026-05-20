@@ -150,10 +150,15 @@ def main() -> None:
                 frame = read_cobs_frame(ser, timeout=1.0)
             except TimeoutError:
                 continue
+            except ValueError as exc:
+                # Partial/garbled frame may appear on USB CDC; keep waiting.
+                print(f"skip frame (decode): {exc}")
+                continue
+
             try:
                 ptype, seq, payload_rx = parse_raw(frame)
             except ValueError as exc:
-                print(f"skip frame: {exc}")
+                print(f"skip frame (raw): {exc}")
                 continue
             if ptype != PKT_SEGMENT_DONE:
                 continue
