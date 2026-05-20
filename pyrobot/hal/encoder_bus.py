@@ -78,20 +78,30 @@ class ExternalEncoderBus:
                 time.sleep(0.01)
         return buf
 
-    def read_raw_ab(self, retries: int = 5) -> tuple[float, float]:
+    def _read_one_raw(self, ser: serial.Serial, per_axis_retries: int = 3) -> float:
+        last_resp = ""
+        for _ in range(per_axis_retries):
+            last_resp = self._query_axis(ser, "AT+PRATE=0")
+            angle = parse_angle(last_resp)
+            if angle is not None:
+                return angle
+            time.sleep(0.04)
+        raise RuntimeError(f"parse failed: {last_resp!r}")
+
+    def read_raw_ab(self, retries: int = 3) -> tuple[float, float]:
         """Return raw device angles (before legacy transform)."""
         self._ensure_open()
         assert self._ser_a is not None and self._ser_b is not None
         last_err: str | None = None
         for _ in range(retries):
-            resp_a = self._query_axis(self._ser_a, "AT+PRATE=0")
-            resp_b = self._query_axis(self._ser_b, "AT+PRATE=0")
-            raw_a = parse_angle(resp_a)
-            raw_b = parse_angle(resp_b)
-            if raw_a is not None and raw_b is not None:
+            try:
+                raw_a = self._read_one_raw(self._ser_a)
+                time.sleep(0.02)
+                raw_b = self._read_one_raw(self._ser_b)
                 return raw_a, raw_b
-            last_err = f"parse failed: a={resp_a!r} b={resp_b!r}"
-            time.sleep(0.05)
+            except RuntimeError as exc:
+                last_err = str(exc)
+                time.sleep(0.05)
         raise RuntimeError(last_err or "encoder read failed")
 
     def read_ab(self, retries: int = 5) -> tuple[float, float]:

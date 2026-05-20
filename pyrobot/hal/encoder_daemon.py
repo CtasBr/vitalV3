@@ -27,12 +27,9 @@ def _ensure_ipc_dir(ipc_dir: str) -> None:
                 pass
 
 
-def read_encoder_state(cfg: RobotConfig | None = None) -> EncoderState:
-    robot_cfg = load_config() if cfg is None else cfg
-
-    offsets = load_offsets(robot_cfg)
-    with ExternalEncoderBus(robot_cfg) as enc:
-        raw_a, raw_b = enc.read_raw_ab()
+def read_encoder_state(enc: ExternalEncoderBus, cfg: RobotConfig) -> EncoderState:
+    offsets = load_offsets(cfg)
+    raw_a, raw_b = enc.read_raw_ab()
     ab = transform_legacy_ab(raw_a, raw_b)
     return EncoderState(
         node="encoder_daemon",
@@ -57,6 +54,7 @@ def main() -> None:
     period = 1.0 / max(cfg.encoders.poll_hz, 1)
 
     running = True
+    last_good: EncoderState | None = None
 
     def _stop(*_args: object) -> None:
         nonlocal running
@@ -67,13 +65,19 @@ def main() -> None:
 
     log.info("started", state=cfg.encoders_state_uri(), hz=cfg.encoders.poll_hz)
     try:
-        while running:
-            try:
-                st = read_encoder_state(cfg)
-                pub.publish(st)
-            except Exception as exc:
-                log.warning("encoder_read_failed", error=str(exc))
-            time.sleep(period)
+        with ExternalEncoderBus(cfg) as enc:
+            while running:
+                try:
+                    st = read_encoder_state(enc, cfg)
+                    last_good = st
+                    pub.publish(st)
+                except Exception as exc:
+                    if last_good is not None:
+                        pub.publish(last_good)
+                        log.warning("encoder_read_failed_using_last", error=str(exc))
+                    else:
+                        log.warning("encoder_read_failed", error=str(exc))
+                time.sleep(period)
     finally:
         pub.close()
         ctx.term()
