@@ -87,6 +87,7 @@ def _dispatch_motion(bus: MotionBus, cmd: MotionCommand) -> SegmentId | None:
 
 
 _MOVE_KINDS = frozenset({"home", "g28", "linear_move", "gcode", "move_joints"})
+_move_slot = threading.Lock()
 
 
 def _run_move_async(bus: MotionBus, cmd: MotionCommand) -> None:
@@ -97,6 +98,21 @@ def _run_move_async(bus: MotionBus, cmd: MotionCommand) -> None:
         log.info("move_async_done", cmd=cmd.kind, segment_id=seg, fault=bus.state.fault_code)
     except Exception as exc:
         log.error("move_async_failed", cmd=cmd.kind, error=str(exc))
+    finally:
+        _move_slot.release()
+
+
+def _start_move_async(bus: MotionBus, cmd: MotionCommand) -> bool:
+    if not _move_slot.acquire(blocking=False):
+        log.warning("move_rejected_already_running", cmd=cmd.kind)
+        return False
+    threading.Thread(
+        target=_run_move_async,
+        args=(bus, cmd),
+        daemon=True,
+        name=f"move-{cmd.kind}",
+    ).start()
+    return True
 
 
 def _ensure_ipc_dir(ipc_dir: str, motion_topics: tuple[str, ...]) -> None:
@@ -213,12 +229,17 @@ def main() -> None:
                 enc_ready = True
 
             if isinstance(bus, Stm32MotionBus):
-                now = time.monotonic()
-                if now >= next_hb_at:
-                    _stm32_keepalive(bus)
-                    next_hb_at = now + hb_interval
-                else:
-                    bus.pump(0.01)
+                try:
+                    now = time.monotonic()
+                    if now >= next_hb_at:
+                        _stm32_keepalive(bus)
+                        next_hb_at = now + hb_interval
+                    else:
+                        bus.pump(0.01)
+                except Exception as exc:
+                    log.error("stm32_uart_loop_failed", error=str(exc))
+                    running = False
+                    break
 
             st = _fresh_state(bus)
             if isinstance(bus, Stm32MotionBus) and st.fault_code == 3:
@@ -260,23 +281,18 @@ def main() -> None:
                     if isinstance(bus, Stm32MotionBus) and bus.state.fault_code != 0:
                         bus.reset_fault()
                         bus.pump(0.05)
-                    threading.Thread(
-                        target=_run_move_async,
-                        args=(bus, cmd),
-                        daemon=True,
-                        name=f"move-{cmd.kind}",
-                    ).start()
-                    if isinstance(bus, Stm32MotionBus):
-                        bus.pump(0.02)
-                    st = _fresh_state(bus)
-                    rep.send_reply(
-                        st.model_copy(
-                            update={
-                                "in_motion": True,
-                                "segment_id_active": st.segment_id_active or 1,
-                            }
+                    if _start_move_async(bus, cmd):
+                        st = _fresh_state(bus)
+                        rep.send_reply(
+                            st.model_copy(
+                                update={
+                                    "in_motion": True,
+                                    "segment_id_active": st.segment_id_active or 1,
+                                }
+                            )
                         )
-                    )
+                    else:
+                        rep.send_reply(_fresh_state(bus))
                 else:
                     seg = _dispatch_motion(bus, cmd)
                     if isinstance(bus, Stm32MotionBus):

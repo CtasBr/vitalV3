@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+import threading
 import time
 from collections.abc import Iterable
 
@@ -65,6 +66,7 @@ class Stm32MotionBus(MotionBus):
         self._last_pos_steps = [0, 0, 0, 0]
         self._encoder_bus: ExternalEncoderBus | None = None
         self._encoder_zmq: EncoderZmqClient | None = None
+        self._uart_lock = threading.RLock()
 
     def set_encoder_zmq(self, client: EncoderZmqClient) -> None:
         """Use ZMQ encoders.state for A/B (from encoder_daemon). Does not open UART encoder ports."""
@@ -93,15 +95,21 @@ class Stm32MotionBus(MotionBus):
         s = self._next_seq() if seq is None else seq & 0xFFFF
         raw = build_raw(pkt_type, s, payload)
         wire = cobs_encode(raw)
-        self._ser.write(wire)
-        self._ser.flush()
+        with self._uart_lock:
+            if not self._ser.is_open:
+                raise serial.SerialException("motion uart closed")
+            self._ser.write(wire)
+            self._ser.flush()
         return s
 
     def _read_frame(self, timeout_s: float) -> tuple[int, int, bytes]:
         deadline = time.monotonic() + timeout_s
         buf = bytearray()
         while time.monotonic() < deadline:
-            b = self._ser.read(1)
+            try:
+                b = self._ser.read(1)
+            except serial.SerialException as exc:
+                raise OSError(f"read failed: {exc}") from exc
             if not b:
                 continue
             if b[0] == 0:
@@ -220,13 +228,22 @@ class Stm32MotionBus(MotionBus):
         """Drain all pending COBS frames (telemetry, SEGMENT_DONE, HB echo, …)."""
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            if self._ser.in_waiting == 0:
-                break
             try:
-                pkt_type, seq, payload = self._read_frame(0.003)
+                with self._uart_lock:
+                    if not self._ser.is_open or self._ser.in_waiting == 0:
+                        break
+                    pkt_type, seq, payload = self._read_frame(0.003)
             except TimeoutError:
                 break
+            except (serial.SerialException, OSError):
+                break
             self._handle_packet(pkt_type, seq, payload)
+
+    def _read_frame_locked(self, timeout_s: float) -> tuple[int, int, bytes]:
+        with self._uart_lock:
+            if not self._ser.is_open:
+                raise serial.SerialException("motion uart closed")
+            return self._read_frame(timeout_s)
 
     def ping(self, timeout_s: float = 2.0) -> bool:
         deadline = time.monotonic() + timeout_s
@@ -236,9 +253,11 @@ class Stm32MotionBus(MotionBus):
             attempt_deadline = min(deadline, time.monotonic() + 0.6)
             while time.monotonic() < attempt_deadline:
                 try:
-                    pkt_type, rx_seq, payload = self._read_frame(0.25)
+                    pkt_type, rx_seq, payload = self._read_frame_locked(0.25)
                 except TimeoutError:
                     continue
+                except (serial.SerialException, OSError):
+                    return False
                 self._handle_packet(pkt_type, rx_seq, payload)
                 if pkt_type == PKT_PONG and rx_seq == seq:
                     return True
@@ -256,9 +275,11 @@ class Stm32MotionBus(MotionBus):
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             try:
-                pkt_type, rx_seq, payload = self._read_frame(0.3)
+                pkt_type, rx_seq, payload = self._read_frame_locked(0.3)
             except TimeoutError:
                 continue
+            except (serial.SerialException, OSError):
+                return False
             self._handle_packet(pkt_type, rx_seq, payload)
             if pkt_type == PKT_HEARTBEAT and rx_seq == seq:
                 return True
@@ -452,9 +473,11 @@ class Stm32MotionBus(MotionBus):
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             try:
-                pkt_type, rx_seq, payload = self._read_frame(0.25)
+                pkt_type, rx_seq, payload = self._read_frame_locked(0.25)
             except TimeoutError:
                 continue
+            except (serial.SerialException, OSError):
+                return False
             self._handle_packet(pkt_type, rx_seq, payload)
             if pkt_type == PKT_FAULT and rx_seq == seq:
                 code = struct.unpack("<i", payload[:4])[0] if len(payload) >= 4 else -1
