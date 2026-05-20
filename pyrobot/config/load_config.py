@@ -107,6 +107,11 @@ class SimulationConfig(BaseModel):
     joint_limits_deg: dict[str, list[float]]
 
 
+class UiConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+
 class RobotConfig(BaseModel):
     schema_version: int = 1
     zmq: ZmqConfig
@@ -118,6 +123,7 @@ class RobotConfig(BaseModel):
     limits: LimitsConfig
     toolheads: ToolheadsConfig
     simulation: SimulationConfig
+    ui: UiConfig = Field(default_factory=UiConfig)
 
     def topic_uri(self, topic: str) -> str:
         return f"ipc://{self.zmq.ipc_dir}/{topic}"

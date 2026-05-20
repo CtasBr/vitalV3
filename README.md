@@ -74,22 +74,24 @@ Python: **uv**, **ruff**, **mypy strict**, **pre-commit**.
 
 **Состояние разработки и контекст для агента:** [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md)
 
-### Быстрый старт (этап 0)
+### Быстрый старт (железо + UI)
 
 ```bash
-uv sync --extra dev
-uv run pytest
-uv run python -m pyrobot.hal.fake_motion          # локальный симулятор
-uv run robot-fake-motion                          # ZMQ-демон motion
-uv run robot-motion-cli state                     # CLI к motion backend из robot.yaml
-python tools/generate_motion_limits_header.py     # синхронизировать limits в firmware из robot.yaml
-python -m pyrobot.hal.motion_cli enc-state        # реальные углы A/B с UART-энкодеров
-python -m pyrobot.hal.motion_cli zero-encoders    # зафиксировать текущую позу как home (90/90/0/0)
-python -m pyrobot.hal.encoder_daemon              # T1: ZMQ encoders.state (владелец UART A/B)
-python -m pyrobot.hal.motion_daemon               # T2: ZMQ motion.state + STM32 (A/B из T1)
-python tools/encoder_sub.py --count 5             # проверка encoders.state
-python tools/motion_sub.py --count 5              # проверка motion.state (q_enc A/B из энкодеров)
+source .venv/bin/activate
+pip install -e .
+pytest -q
+
+# Всё одной командой: encoder + motion + Web UI
+python -m pyrobot.launcher
+# → http://127.0.0.1:8080  (на RPi/LAN: http://<ip>:8080, см. ui.host в robot.yaml)
+
+# G-code: см. docs/GCODE.md
+python -m pyrobot.hal.motion_cli g28
+python -m pyrobot.hal.motion_cli gcode "G1 X250 Y0 Z250 F300"
 ```
+
+Отдельные демоны (если нужно без UI): `encoder_daemon` → `motion_daemon`.  
+Синхронизация лимитов в прошивку: `python tools/generate_motion_limits_header.py`
 
 ---
 

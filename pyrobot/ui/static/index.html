@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>vitalV3 — Robot</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>vitalV3</h1>
+    <span id="conn" class="badge">…</span>
+  </header>
+
+  <main class="grid">
+    <section class="panel state-panel">
+      <h2>Состояние</h2>
+      <pre id="state-box">Загрузка…</pre>
+      <div class="btn-row">
+        <button type="button" id="btn-home">G28 Home</button>
+        <button type="button" id="btn-reset">Reset fault</button>
+        <button type="button" id="btn-estop" class="danger">E-STOP</button>
+      </div>
+    </section>
+
+    <section class="panel video-panel">
+      <h2>Видео (скоро)</h2>
+      <div class="video-grid">
+        <div class="video-slot"><span>Camera 1</span></div>
+        <div class="video-slot"><span>Camera 2</span></div>
+        <div class="video-slot"><span>ToF / depth</span></div>
+        <div class="video-slot"><span>Aux</span></div>
+      </div>
+    </section>
+
+    <section class="panel robot-panel">
+      <h2>Манипулятор (вид сбоку X–Z)</h2>
+      <canvas id="arm-canvas" width="320" height="320"></canvas>
+      <p id="pose-line" class="pose-line">—</p>
+    </section>
+  </main>
+
+  <section class="panel gcode-panel">
+    <h2>G-code</h2>
+    <form id="gcode-form">
+      <input id="gcode-input" type="text" placeholder="G28  |  G1 X250 Y0 Z250 F300" autocomplete="off" />
+      <button type="submit">Отправить</button>
+    </form>
+    <p class="hint">Примеры: <code>G28</code> · <code>G1 X260 Y0 Z240 F200</code> · <code>G0 X250 Y0 Z250</code></p>
+    <pre id="gcode-result"></pre>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

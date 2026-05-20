@@ -68,9 +68,10 @@ vitalV3/
 | **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ |
 | **1-M6** | Heartbeat + ESTOP + fault bit in telemetry (soft-limits позже) | 🔄 код; нужна проверка |
 | **2** | Python HAL daemons (motion + encoders ZMQ) | ✅ проверено на железе |
-| **3** | Кинематика + planner + G28/G0/G1 | 🔄 код; проверка на роботе |
-| **3b** | G28 (home), G-code G0/G1 → `MotionCommand` | 🔄 в **3** |
-| **4–7** | Vision, skills, state machine, Web UI, AI | ⏳ |
+| **3** | Кинематика + planner + G28/G0/G1 | ✅ на железе |
+| **3b** | G28 (home), G-code G0/G1 → `MotionCommand` | ✅ |
+| **6** | Web UI + `python -m pyrobot.launcher` | 🔄 |
+| **4–5, 7** | Vision, skills, AI | ⏳ |
 
 ---
 

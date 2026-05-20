@@ -72,6 +72,10 @@ toolheads:
   mid_x: [354.0, 340.0, 320.0]
   table_len_mm: 200.0
 
+ui:
+  host: "0.0.0.0"   # 0.0.0.0 — доступ с RPi / LAN; 127.0.0.1 — только локально
+  port: 8080
+
 simulation:
   fake_motion_hz: 100
   joint_limits_deg:

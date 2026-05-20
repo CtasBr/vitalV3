@@ -5,12 +5,14 @@ description = "Robot manipulator stack — STM32 motion + Mac perception/behavio
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.115.0",
     "msgpack>=1.1.0",
     "pydantic>=2.10.0",
     "pyserial>=3.5",
     "pyyaml>=6.0.2",
     "pyzmq>=26.2.0",
     "structlog>=24.4.0",
+    "uvicorn[standard]>=0.32.0",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +25,8 @@ dev = [
 ]
 
 [project.scripts]
+robot = "pyrobot.launcher:main"
+robot-web = "pyrobot.ui.web_server:main"
 robot-fake-motion = "pyrobot.hal.fake_motion_daemon:main"
 robot-encoder-daemon = "pyrobot.hal.encoder_daemon:main"
 robot-motion-daemon = "pyrobot.hal.motion_daemon:main"
