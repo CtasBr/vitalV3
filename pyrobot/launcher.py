@@ -21,12 +21,19 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _child_specs(with_web: bool, web_host: str | None, web_port: int | None) -> list[tuple[str, list[str]]]:
+def _child_specs(
+    with_web: bool,
+    with_vision: bool,
+    web_host: str | None,
+    web_port: int | None,
+) -> list[tuple[str, list[str]]]:
     base = [_python(), "-m"]
     specs: list[tuple[str, list[str]]] = [
         ("encoder", base + ["pyrobot.hal.encoder_daemon"]),
         ("motion", base + ["pyrobot.hal.motion_daemon"]),
     ]
+    if with_vision:
+        specs.append(("vision", base + ["pyrobot.perception.vision_daemon"]))
     if with_web:
         web_cmd = base + ["pyrobot.ui.web_server"]
         if web_host:
@@ -66,6 +73,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     specs = _child_specs(
         with_web=not args.no_web,
+        with_vision=not args.no_vision,
         web_host=cfg.ui.host,
         web_port=cfg.ui.port,
     )
@@ -83,6 +91,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             time.sleep(1.0)
         elif name == "motion":
             time.sleep(1.5)
+        elif name == "vision":
+            time.sleep(0.5)
 
     _write_pids(procs)
     for name, proc in procs:
@@ -147,7 +157,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="vitalV3 — start encoder + motion + web UI",
+        description="vitalV3 — start encoder + motion + vision + web UI",
         prog="robot",
     )
     parser.add_argument("--config", default=None, help="Path to robot.yaml")
@@ -155,6 +165,7 @@ def main() -> None:
 
     p_start = sub.add_parser("start", help="Start all daemons (default)")
     p_start.add_argument("--no-web", action="store_true", help="Skip web UI")
+    p_start.add_argument("--no-vision", action="store_true", help="Skip vision daemon (no cameras)")
     p_start.add_argument("--force", action="store_true", help="Restart if already running")
     sub.add_parser("stop", help="Stop daemons from pid file")
     sub.add_parser("status", help="Check pid file")
@@ -164,7 +175,7 @@ def main() -> None:
         start_ns = (
             args
             if args.cmd == "start"
-            else argparse.Namespace(config=args.config, no_web=False, force=False)
+            else argparse.Namespace(config=args.config, no_web=False, no_vision=False, force=False)
         )
         raise SystemExit(cmd_start(start_ns))
     if args.cmd == "stop":

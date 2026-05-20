@@ -21,3 +21,10 @@ def test_load_config_from_path() -> None:
 def test_topic_uri() -> None:
     cfg = load_config()
     assert cfg.motion_state_uri().startswith("ipc:///tmp/robot/")
+    assert cfg.vision_detections_uri().endswith("vision.detections")
+
+
+def test_vision_config() -> None:
+    cfg = load_config()
+    assert cfg.vision.frame_dir == "/tmp/robot/frames"
+    assert cfg.vision.display_size == [640, 480]

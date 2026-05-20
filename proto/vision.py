@@ -34,3 +34,11 @@ class Detection(SchemaHeader):
     bbox_xyxy: list[float] = Field(min_length=4, max_length=4)
     mask_shm_name: str | None = None
     source: str = "yolo"
+
+
+class VisionState(SchemaHeader):
+    """vision_daemon → UI / skills."""
+
+    detections: list[Detection] = Field(default_factory=list)
+    tof_distance_mm: float | None = None
+    offset_mm: list[float] | None = Field(default=None, min_length=3, max_length=3)

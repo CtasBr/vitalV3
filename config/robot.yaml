@@ -6,6 +6,7 @@ zmq:
     motion_cmd: "motion.cmd"
     motion_state: "motion.state"
     encoders_state: "encoders.state"
+    encoders_cmd: "encoders.cmd"
     camera_rgb: "camera.rgb"
     tof_depth: "tof.depth"
     vision_detections: "vision.detections"
@@ -50,7 +51,8 @@ tof:
   delta_mm: 38
 
 camera:
-  index: 0
+  index: 0          # проверено: tools/list_cameras.py → cam0_default.jpg
+  backend: default  # default дал адекватное изображение (не avfoundation)
   width: 1920
   height: 1080
 
@@ -75,6 +77,20 @@ toolheads:
 ui:
   host: "0.0.0.0"   # 0.0.0.0 — доступ с RPi / LAN; 127.0.0.1 — только локально
   port: 8080
+  jog_step_mm: 10        # шаг голосового / jog, если без числа (мм)
+  voice_feed_mm_min: 800 # F для G1 из голоса / эмулятора (мм/мин)
+
+vision:
+  frame_dir: "/tmp/robot/frames"
+  loop_hz: 10
+  display_size: [640, 480]
+  camera_enabled: true
+  tof_enabled: true
+  tof_fps: 10
+  tof_disp: 3
+  yolo_enabled: true
+  yolo_model: "yolov8s.pt"
+  yolo_every_n_frames: 2
 
 simulation:
   fake_motion_hz: 100

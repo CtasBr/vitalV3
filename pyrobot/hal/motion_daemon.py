@@ -10,6 +10,7 @@ import zmq
 
 from proto.motion import MotionCommand, MotionState, SegmentId
 from pyrobot.config.load_config import load_config
+from pyrobot.hal.encoder_offsets import load_offsets
 from pyrobot.hal.encoder_zmq import EncoderZmqClient
 from pyrobot.hal.factory import create_motion_bus
 from pyrobot.hal.motion_bus import MotionBus
@@ -228,6 +229,10 @@ def main() -> None:
                     for _ in range(3):
                         _stm32_keepalive(bus)
                         time.sleep(hb_interval)
+                    rep.send_reply(_fresh_state(bus))
+                elif cmd.kind == "reload_encoders" and isinstance(bus, Stm32MotionBus):
+                    bus._enc_offset_deg = load_offsets(cfg)
+                    bus.pump(0.05)
                     rep.send_reply(_fresh_state(bus))
                 elif cmd.kind == "stream_segment" and cmd.segment is not None:
                     bus.stream_segments([cmd.segment])

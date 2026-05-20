@@ -30,6 +30,10 @@ vital_motion/.settings/
 .DS_Store
 Thumbs.db
 
+# Vision models / probe artifacts
+yolov8*.pt
+debug_files/camera_probe/
+
 # Robot runtime
 /tmp/robot/
 *.mcap

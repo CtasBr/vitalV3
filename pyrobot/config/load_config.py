@@ -16,6 +16,7 @@ class ZmqTopics(BaseModel):
     motion_cmd: str
     motion_state: str
     encoders_state: str
+    encoders_cmd: str = "encoders.cmd"
     camera_rgb: str
     tof_depth: str
     vision_detections: str
@@ -76,6 +77,8 @@ class CameraConfig(BaseModel):
     index: int = 0
     width: int = 1920
     height: int = 1080
+    # auto | avfoundation (macOS) | v4l2 (Linux) | default
+    backend: str = "auto"
 
 
 class HomePose(BaseModel):
@@ -110,6 +113,21 @@ class SimulationConfig(BaseModel):
 class UiConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
+    jog_step_mm: float = 10.0
+    voice_feed_mm_min: float = 800.0
+
+
+class VisionConfig(BaseModel):
+    frame_dir: str = "/tmp/robot/frames"
+    loop_hz: int = 10
+    display_size: list[int] = Field(default_factory=lambda: [640, 480], min_length=2, max_length=2)
+    camera_enabled: bool = True
+    tof_enabled: bool = True
+    tof_fps: int = 10
+    tof_disp: int = 3
+    yolo_enabled: bool = True
+    yolo_model: str = "yolov8s.pt"
+    yolo_every_n_frames: int = 2
 
 
 class RobotConfig(BaseModel):
@@ -124,6 +142,7 @@ class RobotConfig(BaseModel):
     toolheads: ToolheadsConfig
     simulation: SimulationConfig
     ui: UiConfig = Field(default_factory=UiConfig)
+    vision: VisionConfig = Field(default_factory=VisionConfig)
 
     def topic_uri(self, topic: str) -> str:
         return f"ipc://{self.zmq.ipc_dir}/{topic}"
@@ -136,6 +155,12 @@ class RobotConfig(BaseModel):
 
     def encoders_state_uri(self) -> str:
         return self.topic_uri(self.zmq.topics.encoders_state)
+
+    def vision_detections_uri(self) -> str:
+        return self.topic_uri(self.zmq.topics.vision_detections)
+
+    def encoders_cmd_uri(self) -> str:
+        return self.topic_uri(self.zmq.topics.encoders_cmd)
 
 
 def load_config(path: Path | str | None = None) -> RobotConfig:

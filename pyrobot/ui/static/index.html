@@ -18,35 +18,72 @@
       <pre id="state-box">Загрузка…</pre>
       <div class="btn-row">
         <button type="button" id="btn-home">G28 Home</button>
+        <button type="button" id="btn-zero-enc" class="secondary" title="AT+ZERO A/B + offset → home 90/90">Zero encoders</button>
         <button type="button" id="btn-reset">Reset fault</button>
         <button type="button" id="btn-estop" class="danger">E-STOP</button>
       </div>
     </section>
 
     <section class="panel video-panel">
-      <h2>Видео (скоро)</h2>
+      <h2>Камеры / ToF</h2>
+      <p id="tof-line" class="pose-line">ToF: —</p>
+      <p id="yolo-line" class="pose-line">YOLO: —</p>
       <div class="video-grid">
-        <div class="video-slot"><span>Camera 1</span></div>
-        <div class="video-slot"><span>Camera 2</span></div>
-        <div class="video-slot"><span>ToF / depth</span></div>
-        <div class="video-slot"><span>Aux</span></div>
+        <figure class="video-slot">
+          <img id="stream-rgb" alt="RGB + YOLO" />
+          <figcaption>RGB</figcaption>
+        </figure>
+        <figure class="video-slot">
+          <img id="stream-depth" alt="ToF depth" />
+          <figcaption>Depth</figcaption>
+        </figure>
+        <figure class="video-slot">
+          <img id="stream-mask" alt="Sobel mask" />
+          <figcaption>Mask</figcaption>
+        </figure>
+        <figure class="video-slot">
+          <img id="stream-track" alt="Contour track" />
+          <figcaption>Track</figcaption>
+        </figure>
       </div>
     </section>
 
     <section class="panel robot-panel">
-      <h2>Манипулятор (вид сбоку X–Z)</h2>
+      <h2>Углы A и B</h2>
       <canvas id="arm-canvas" width="320" height="320"></canvas>
       <p id="pose-line" class="pose-line">—</p>
     </section>
   </main>
 
   <section class="panel gcode-panel">
-    <h2>G-code</h2>
+    <h2>G-code и голос</h2>
     <form id="gcode-form">
       <input id="gcode-input" type="text" placeholder="G28  |  G1 X250 Y0 Z250 F300" autocomplete="off" />
       <button type="submit">Отправить</button>
+      <button type="button" id="btn-voice" class="secondary" title="Распознавание речи">🎤 Голос</button>
     </form>
-    <p class="hint">Примеры: <code>G28</code> · <code>G1 X260 Y0 Z240 F200</code> · <code>G0 X250 Y0 Z250</code></p>
+    <div class="feed-row">
+      <label for="feed-slider">Скорость (F)</label>
+      <input id="feed-slider" type="range" min="100" max="4000" step="50" value="800" />
+      <span id="feed-value">800</span>
+      <span class="feed-unit">mm/min</span>
+    </div>
+    <p id="voice-status" class="pose-line">
+      Голос: «вперед 100», «ты видишь чашку», «привет», «пока», «да»/«нет», «танцуй»
+    </p>
+    <form id="voice-emulator-form" class="voice-emulator">
+      <input
+        id="voice-emulator-input"
+        type="text"
+        placeholder="Эмулятор: вперед 100"
+        autocomplete="off"
+      />
+      <button type="submit" class="secondary">Как голос</button>
+    </form>
+    <p class="hint">
+      Примеры: <code>вперед 30</code> · <code>30 вперед</code> · <code>вниз 5</code> ·
+      только <code>влево</code> (= <code>ui.jog_step_mm</code>) · <code>G28</code>
+    </p>
     <pre id="gcode-result"></pre>
   </section>
 

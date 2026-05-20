@@ -7,12 +7,13 @@ from proto.motion import (
     MoveSegment,
     SegmentId,
 )
-from proto.vision import DepthFrame, Detection, EncoderState, RgbFrame
+from proto.vision import DepthFrame, Detection, EncoderState, RgbFrame, VisionState
 
 __all__ = [
     "DepthFrame",
     "Detection",
     "EncoderState",
+    "VisionState",
     "Heartbeat",
     "MotionCommand",
     "MotionState",

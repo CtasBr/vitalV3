@@ -16,6 +16,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+vision = [
+    "numpy>=2.0.0",
+    "opencv-python-headless>=4.10.0",
+    "ultralytics>=8.3.0",
+]
 dev = [
     "mypy>=1.14.0",
     "pre-commit>=4.0.0",
@@ -31,6 +36,7 @@ robot-fake-motion = "pyrobot.hal.fake_motion_daemon:main"
 robot-encoder-daemon = "pyrobot.hal.encoder_daemon:main"
 robot-motion-daemon = "pyrobot.hal.motion_daemon:main"
 robot-motion-cli = "pyrobot.hal.motion_cli:main"
+robot-vision-daemon = "pyrobot.perception.vision_daemon:main"
 
 [build-system]
 requires = ["hatchling"]

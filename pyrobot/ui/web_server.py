@@ -5,17 +5,20 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from proto.motion import MotionCommand
 from pyrobot.behaviour.gcode import gcode_to_motion_command
 from pyrobot.config.load_config import load_config
+from pyrobot.hal.encoder_zmq_client import EncoderZmqClient
 from pyrobot.hal.motion_zmq_client import MotionZmqClient
+from pyrobot.perception.frame_store import FrameStore
 from pyrobot.ui.state_cache import RobotStateCache
 
 _STATIC = Path(__file__).resolve().parent / "static"
+_FRAME_NAMES = frozenset({"rgb", "depth", "mask", "track"})
 
 
 class GcodeBody(BaseModel):
@@ -32,7 +35,23 @@ def create_app(cache: RobotStateCache | None = None) -> FastAPI:
 
     @app.get("/api/state")
     def api_state() -> dict[str, Any]:
-        return state_cache.snapshot()
+        snap = state_cache.snapshot()
+        snap["ui"] = {
+            "jog_step_mm": cfg.ui.jog_step_mm,
+            "voice_feed_mm_min": cfg.ui.voice_feed_mm_min,
+        }
+        return snap
+
+    frames = FrameStore(cfg.vision.frame_dir)
+
+    @app.get("/api/frame/{name}")
+    def api_frame(name: str) -> Response:
+        if name not in _FRAME_NAMES:
+            raise HTTPException(404, f"unknown frame: {name}")
+        data = frames.read_jpeg(name)
+        if data is None:
+            raise HTTPException(404, "no frame yet")
+        return Response(content=data, media_type="image/jpeg")
 
     def _send_motion(cmd: MotionCommand) -> dict[str, Any]:
         try:
@@ -85,6 +104,34 @@ def create_app(cache: RobotStateCache | None = None) -> FastAPI:
     @app.post("/api/estop")
     def api_estop() -> dict[str, Any]:
         return _send_motion(MotionCommand(kind="estop", node="web"))
+
+    @app.post("/api/zero-encoders")
+    def api_zero_encoders() -> dict[str, Any]:
+        snap = state_cache.snapshot()
+        motion = snap.get("motion") or {}
+        if motion.get("in_motion"):
+            raise HTTPException(409, "robot is moving; wait until idle")
+        try:
+            with EncoderZmqClient(cfg) as enc_client:
+                zero = enc_client.zero_encoders(hardware_zero=True)
+            if not zero.ok:
+                raise HTTPException(500, "encoder zero failed")
+            with MotionZmqClient(cfg) as motion_client:
+                st = motion_client.send_command(
+                    MotionCommand(kind="reload_encoders", node="web")
+                )
+            return {
+                "ok": True,
+                "encoders": zero.model_dump(mode="json"),
+                "motion": st.model_dump(mode="json"),
+            }
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                503,
+                f"zero encoders failed (is encoder_daemon running?): {exc}",
+            ) from exc
 
     @app.get("/")
     def index() -> FileResponse:
