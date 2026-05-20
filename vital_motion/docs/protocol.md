@@ -38,3 +38,17 @@ Transport: **COBS** framing + **CRC16-CCITT** (poly 0x1021, init 0xFFFF).
 Host sends COBS(`PKT_PING`, seq=N). MCU replies COBS(`PKT_PONG`, same seq).
 
 Text commands (`PING`, `STEP`) remain for bring-up until M5.
+
+## M5-min implemented (axis A only)
+
+`PKT_MOVE_SEGMENT` payload (8 bytes, LE):
+
+| Offset | Type | Meaning |
+|--------|------|---------|
+| 0 | int32 | `steps_a` |
+| 4 | uint32 | `arr_a` (TIM1 ARR, speed) |
+
+MCU executes `motor_axis_a_move(steps_a, arr_a)` and replies:
+
+- `PKT_SEGMENT_DONE` with same `seq`
+- payload 4 bytes: `done_steps` (int32)

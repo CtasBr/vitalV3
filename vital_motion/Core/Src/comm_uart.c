@@ -55,11 +55,43 @@ static void comm_uart_send_pong(uint16_t seq)
   comm_uart_send_raw_cobs(&pkt);
 }
 
+static void comm_uart_send_segment_done(uint16_t seq, int32_t done_steps)
+{
+  uint8_t payload[4];
+  pkt_raw_t pkt;
+  memcpy(payload, &done_steps, sizeof(done_steps));
+  if (protocol_build(&pkt, PKT_SEGMENT_DONE, seq, payload, sizeof(payload)) != 0)
+  {
+    return;
+  }
+  comm_uart_send_raw_cobs(&pkt);
+}
+
 static void comm_uart_handle_binary(const pkt_raw_t *pkt)
 {
   if (pkt->type == (uint8_t)PKT_PING)
   {
     comm_uart_send_pong(pkt->seq);
+    return;
+  }
+
+  if (pkt->type == (uint8_t)PKT_MOVE_SEGMENT)
+  {
+    /* M5-min payload layout (LE):
+     * [0..3] int32 steps_a
+     * [4..7] uint32 arr_a
+     */
+    if (pkt->payload_len < 8U)
+    {
+      return;
+    }
+
+    int32_t steps = 0;
+    uint32_t arr = 5000U;
+    memcpy(&steps, &pkt->payload[0], sizeof(steps));
+    memcpy(&arr, &pkt->payload[4], sizeof(arr));
+    (void)motor_axis_a_move(steps, arr);
+    comm_uart_send_segment_done(pkt->seq, steps);
   }
 }
 
@@ -71,7 +103,7 @@ void comm_uart_init(void)
   comm_uart_tx_str("\r\n=== vital_motion M4 (USART2) ===\r\n");
 #endif
   comm_uart_tx_str("Text: PING | STEP <n> [arr]\r\n");
-  comm_uart_tx_str("Binary: COBS frame PKT_PING (see tools/uart_pkt_ping.py)\r\n");
+  comm_uart_tx_str("Binary: PKT_PING, PKT_MOVE_SEGMENT (tools/uart_pkt_*.py)\r\n");
   protocol_rx_reset();
 }
 

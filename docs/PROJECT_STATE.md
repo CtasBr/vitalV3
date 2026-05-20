@@ -64,8 +64,8 @@ vitalV3/
 | **1-M1** | printf / USART3 | ✅ |
 | **1-M2** | UART echo, `PING`→`PONG` | ✅ |
 | **1-M3** | Ось A: `STEP n [arr]`, TIM1 | ✅ **проверено пользователем** |
-| **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ код, нужна прошивка |
-| **1-M5** | 4 оси, segment buffer | ⏳ |
+| **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
+| **1-M5** | M5-min: PKT_MOVE_SEGMENT для оси A + SEGMENT_DONE | ✅ код, нужна прошивка |
 | **1-M6** | Heartbeat, ESTOP, soft limits | ⏳ |
 | **2** | Python motion_bridge + SHM camera | ⏳ |
 | **3–7** | Vision, kinematics, skills, AI | ⏳ |
@@ -77,7 +77,7 @@ vitalV3/
 | Файл | Роль |
 |------|------|
 | `main.c` | init, FreeRTOS tasks, `HAL_TIM_PeriodElapsedCallback` → TIM7 tick + TIM1 motor |
-| `comm_uart.c` | Текстовые команды: `PING`, `STEP` |
+| `comm_uart.c` | Текст + бинарные PKT (`PING/PONG`, `MOVE_SEGMENT`, `SEGMENT_DONE`) |
 | `motor.c` | `motor_axis_a_move(steps, tim_arr)` — TIM1 PWM |
 | `board_config.h` | USART3 vs USART2 |
 | `protocol.c` | M4: COBS, CRC16, `PKT_PING`→`PKT_PONG` |
@@ -110,7 +110,7 @@ Mac: `tools/uart_ping.py`, `tools/uart_step.py`
 
 См. `vital_motion/docs/protocol.md`.
 
-- Fixed payload **60 B** + COBS frame
+- Raw packet **54 B** + COBS frame
 - CRC16-CCITT, `seq`, типы пакетов
 - Смысл полей согласован с `proto/motion.py` (Mac — msgpack, MCU — packed struct)
 
@@ -162,6 +162,7 @@ screen /dev/cu.usbmodem* 115200
 python3 tools/uart_ping.py
 python3 tools/uart_step.py 20
 python3 tools/uart_pkt_ping.py   # M4
+python3 tools/uart_pkt_step.py 20 5000   # M5-min
 ```
 
 ---
@@ -174,12 +175,9 @@ python3 tools/uart_pkt_ping.py   # M4
 
 ---
 
-## Следующая работа (M4)
+## Следующая работа (M5 → M6)
 
-1. `protocol.c/h` — CRC, COBS, `PKT_PING` / `PKT_PONG`
-2. `comm_uart.c` — режим: строка **или** бинарный кадр (magic `0x56`)
-3. `tools/uart_pkt_ping.py`
-4. Документ `vital_motion/docs/protocol.md`
-5. Не ломать текстовый `STEP` до M5
-
-После M4–M6: `pyrobot/hal/stm32_bridge.py` + переключить `motion.backend: stm32`.
+1. Расширить `PKT_MOVE_SEGMENT` до 4 осей (A/B/C/D)
+2. Добавить `PKT_TELEMETRY` 100 Hz
+3. Heartbeat + watchdog + ESTOP
+4. После M6: `pyrobot/hal/stm32_bridge.py` + `motion.backend: stm32`
