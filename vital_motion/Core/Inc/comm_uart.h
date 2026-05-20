@@ -10,6 +10,8 @@ extern "C" {
 #endif
 
 void comm_uart_init(void);
+/** Non-blocking RX: heartbeat / estop while motor task waits (M6). */
+void comm_uart_service_rx(void);
 /** Блокирующий цикл: опрос RX, ответы. Вызывать из задачи FreeRTOS. */
 void comm_uart_poll_loop(void);
 

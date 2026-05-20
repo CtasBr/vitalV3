@@ -3,6 +3,7 @@
  * @brief M5 — шаговый драйвер 4 осей через TIM1..4 PWM + Update IT.
  */
 #include "motor.h"
+#include "comm_uart.h"
 #include "main.h"
 #include "cmsis_os.h"
 
@@ -134,12 +135,22 @@ int motor_move_4axes(const int32_t steps[4], const uint32_t tim_arr[4])
     {
       continue;
     }
-    if (osSemaphoreAcquire(g_done_sems[i], 30000) != osOK)
+    uint32_t waited_ms = 0;
+    while (waited_ms < 30000U)
     {
-      g_axes[i].running = 0;
-      HAL_TIM_PWM_Stop(g_axes[i].htim, g_axes[i].channel);
-      HAL_TIM_Base_Stop_IT(g_axes[i].htim);
-      return -1;
+      comm_uart_service_rx();
+      if (osSemaphoreAcquire(g_done_sems[i], 50) == osOK)
+      {
+        break;
+      }
+      waited_ms += 50U;
+      if (waited_ms >= 30000U)
+      {
+        g_axes[i].running = 0;
+        HAL_TIM_PWM_Stop(g_axes[i].htim, g_axes[i].channel);
+        HAL_TIM_Base_Stop_IT(g_axes[i].htim);
+        return -1;
+      }
     }
   }
   return 0;

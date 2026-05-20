@@ -66,12 +66,12 @@ vitalV3/
 | **1-M3** | Ось A: `STEP n [arr]`, TIM1 | ✅ **проверено пользователем** |
 | **1-M4** | Бинарный протокол COBS+CRC, PKT PING/PONG | ✅ **проверено пользователем** |
 | **1-M5** | PKT_MOVE_SEGMENT (4-axis payload), 4-axis exec, SEGMENT_DONE/FAULT | ✅ |
-| **1-M6** | Heartbeat + ESTOP + fault bit in telemetry (soft-limits позже) | 🔄 код; нужна проверка |
+| **1-M6** | Heartbeat + ESTOP + soft limits + RX во время движения | 🔄 прошивка + daemon async moves |
 | **2** | Python HAL daemons (motion + encoders ZMQ) | ✅ проверено на железе |
 | **3** | Кинематика + planner + G28/G0/G1 | ✅ на железе |
-| **3b** | G28 (home), G-code G0/G1 → `MotionCommand` | ✅ |
-| **6** | Web UI + `python -m pyrobot.launcher` | 🔄 |
-| **4–5, 7** | Vision, skills, AI | ⏳ |
+| **3b** | Multi-segment G1 + closed-loop A/B | 🔄 код (`max_steps_per_segment`) |
+| **6** | Web UI + launcher + vision + голос | ✅ MVP |
+| **4–5, 7** | Skills (find_object), AI, SHM vision | ⏳ |
 
 ---
 
@@ -204,10 +204,10 @@ python3 tools/uart_pkt_estop.py       # M6 estop -> fault
 
 ## Следующая работа
 
-1. **Этап 3 на железе:** `encoder_daemon` + `motion_daemon`, затем `motion_cli g28`, `g1 260 0 240 --f 300`
-2. ZMQ-клиент для skills: отправка `MotionCommand(linear_move|home|gcode)` в `motion.cmd`
-3. Этап 4: vision nodes (camera, ToF)
-4. Multi-segment траектории, closed-loop коррекция по энкодерам (см. README)
+1. Проверка на железе: длинный `G1` (100 mm), нет fault 3, плавность multi-segment
+2. Skills: `find_object` + подвод к bbox YOLO
+3. MCU segment queue (опционально) — сейчас цепочка сегментов с хоста
+4. Разнести vision на отдельные ноды + SHM
 
 ---
 

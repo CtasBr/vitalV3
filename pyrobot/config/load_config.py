@@ -39,6 +39,11 @@ class MotionConfig(BaseModel):
     heartbeat_hz: int = 10
     watchdog_ms: int = 200
     max_abs_steps_cmd: int = 500
+    max_steps_per_segment: int = 600
+    closed_loop_ab: bool = True
+    closed_loop_ab_gain: float = 1.0
+    closed_loop_max_corr_deg: float = 4.0
+    mcu_watchdog_idle_ms: int = 2500
     soft_limits_steps: dict[str, tuple[int, int]] = Field(
         default_factory=lambda: {
             "a": (-4800, 4800),

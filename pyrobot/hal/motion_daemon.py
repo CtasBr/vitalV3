@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import signal
 import sys
+import threading
 import time
 
 import structlog
@@ -73,6 +74,9 @@ def _dispatch_motion(bus: MotionBus, cmd: MotionCommand) -> SegmentId | None:
         return None
 
     if cmd.kind == "move_joints" and cmd.target_q_deg is not None:
+        move_j = getattr(bus, "move_to_joints_deg", None)
+        if callable(move_j):
+            return move_j(list(cmd.target_q_deg))
         return bus.move_joints(
             cmd.target_q_deg,
             vmax_deg_s=cmd.max_vel_mm_s,
@@ -80,6 +84,19 @@ def _dispatch_motion(bus: MotionBus, cmd: MotionCommand) -> SegmentId | None:
         )
 
     return None
+
+
+_MOVE_KINDS = frozenset({"home", "g28", "linear_move", "gcode", "move_joints"})
+
+
+def _run_move_async(bus: MotionBus, cmd: MotionCommand) -> None:
+    try:
+        seg = _dispatch_motion(bus, cmd)
+        if isinstance(bus, Stm32MotionBus):
+            bus.pump(0.1)
+        log.info("move_async_done", cmd=cmd.kind, segment_id=seg, fault=bus.state.fault_code)
+    except Exception as exc:
+        log.error("move_async_failed", cmd=cmd.kind, error=str(exc))
 
 
 def _ensure_ipc_dir(ipc_dir: str, motion_topics: tuple[str, ...]) -> None:
@@ -239,6 +256,27 @@ def main() -> None:
                     if isinstance(bus, Stm32MotionBus):
                         bus.pump(0.05)
                     rep.send_reply(_fresh_state(bus))
+                elif cmd.kind in _MOVE_KINDS:
+                    if isinstance(bus, Stm32MotionBus) and bus.state.fault_code != 0:
+                        bus.reset_fault()
+                        bus.pump(0.05)
+                    threading.Thread(
+                        target=_run_move_async,
+                        args=(bus, cmd),
+                        daemon=True,
+                        name=f"move-{cmd.kind}",
+                    ).start()
+                    if isinstance(bus, Stm32MotionBus):
+                        bus.pump(0.02)
+                    st = _fresh_state(bus)
+                    rep.send_reply(
+                        st.model_copy(
+                            update={
+                                "in_motion": True,
+                                "segment_id_active": st.segment_id_active or 1,
+                            }
+                        )
+                    )
                 else:
                     seg = _dispatch_motion(bus, cmd)
                     if isinstance(bus, Stm32MotionBus):

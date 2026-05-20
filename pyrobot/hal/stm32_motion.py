@@ -14,12 +14,15 @@ from pyrobot.hal.encoder_zmq import EncoderZmqClient
 from pyrobot.hal.fault_codes import mcu_fault_message
 from pyrobot.hal.motion_bus import MotionBus
 from pyrobot.kinematics.forward import joint_deg_to_pose
+from pyrobot.kinematics.inverse import pose_to_joint_deg
+from pyrobot.motion.execute_chain import execute_segment_chain
 from pyrobot.motion.planner import (
     feed_for_linear,
     plan_home_move,
     plan_joint_move,
     plan_pose_move,
 )
+from pyrobot.motion.segment_chain import plan_joint_move_chain, split_move_segment
 from pyrobot.hal.stm32_protocol import (
     PKT_ESTOP,
     PKT_FAULT,
@@ -298,23 +301,57 @@ class Stm32MotionBus(MotionBus):
         rapid: bool = False,
         d_target_deg: float | None = None,
     ) -> SegmentId:
-        """G0/G1: Cartesian target -> joint IK -> one MOVE_SEGMENT."""
+        """G0/G1: Cartesian target -> joint IK -> segmented MOVE with A/B closed-loop."""
         q_cur = list(q_current_deg if q_current_deg is not None else self.state.q_enc_deg)
         feed = feed_for_linear(rapid=rapid, feed_mm_min=feed_mm_min)
-        seg = plan_pose_move(
-            pose_mm,
-            q_cur,
-            self._cfg.kinematics,
-            feed_mm_min=feed,
-            d_target_deg=d_target_deg,
+        link = self._cfg.kinematics.link_length_mm
+        joints = pose_to_joint_deg(
+            pose_mm[0],
+            pose_mm[1],
+            pose_mm[2],
+            link_length_mm=link,
         )
-        return self.move_steps(seg.axis_steps, seg.period_us)
+        d = q_cur[3] if d_target_deg is None else d_target_deg
+        q_tgt = [joints.a, joints.b, joints.c, d]
+        cur_pose = joint_deg_to_pose(q_cur[0], q_cur[1], q_cur[2], link_length_mm=link)
+        dx = pose_mm[0] - cur_pose.x
+        dy = pose_mm[1] - cur_pose.y
+        dz = pose_mm[2] - cur_pose.z
+        segments = plan_joint_move_chain(
+            q_tgt,
+            q_cur,
+            self._cfg,
+            cartesian_delta_mm=(dx, dy, dz),
+            feed_mm_min=feed,
+        )
+        return self._execute_segment_chain(segments, q_cur, q_tgt)
+
+    def _execute_segment_chain(
+        self,
+        segments: list[MoveSegment],
+        q_start_deg: list[float],
+        q_target_deg: list[float],
+    ) -> SegmentId:
+        if not segments:
+            return 0
+        st = execute_segment_chain(
+            self,
+            segments,
+            self._cfg,
+            q_start_deg=q_start_deg,
+            q_target_deg=q_target_deg,
+        )
+        self._last_state = st
+        return segments[-1].segment_id
 
     def home(self, feed_mm_min: float = 300.0) -> SegmentId:
         """G28: move to encoders.home_deg (default 90/90/0/0)."""
+        del feed_mm_min
         q_cur = list(self.state.q_enc_deg)
-        seg = plan_home_move(q_cur, self._cfg, feed_mm_min=feed_mm_min)
-        return self.move_steps(seg.axis_steps, seg.period_us)
+        q_tgt = list(self._cfg.encoders.home_deg)
+        seg = plan_home_move(q_cur, self._cfg)
+        segments = split_move_segment(seg, self._cfg.motion.max_steps_per_segment)
+        return self._execute_segment_chain(segments, q_cur, q_tgt)
 
     def current_pose_mm(self) -> list[float]:
         q = self.state.q_enc_deg

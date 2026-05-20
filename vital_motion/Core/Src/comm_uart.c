@@ -23,6 +23,8 @@ extern UART_HandleTypeDef huart2;
 
 #define RX_LINE_MAX 48
 #define AXIS_COUNT MOTION_LIMIT_AXES
+/* Host HB while idle; must exceed motion_daemon period (e.g. 100 ms @ 10 Hz). */
+#define COMM_UART_WATCHDOG_IDLE_MS 2500U
 static uint16_t g_tx_seq;
 static uint8_t g_fault_code;
 static uint32_t g_last_hb_ms;
@@ -298,6 +300,26 @@ static void comm_uart_handle_line(const char *line)
   comm_uart_tx_str("ERR unknown cmd\r\n");
 }
 
+void comm_uart_service_rx(void)
+{
+  uint8_t byte;
+  pkt_raw_t pkt;
+
+  while (HAL_UART_Receive(MOTION_UART, &byte, 1, 0) == HAL_OK)
+  {
+    const int br = protocol_rx_feed(byte, &pkt);
+    if (br == 1)
+    {
+      comm_uart_handle_binary(&pkt);
+      continue;
+    }
+    if (br < 0)
+    {
+      protocol_rx_reset();
+    }
+  }
+}
+
 void comm_uart_poll_loop(void)
 {
   uint8_t byte;
@@ -315,7 +337,7 @@ void comm_uart_poll_loop(void)
       last_telemetry_ms = now;
     }
 
-    if (g_hb_seen && !motor_any_in_motion() && (now - g_last_hb_ms) > 1000U)
+    if (g_hb_seen && !motor_any_in_motion() && (now - g_last_hb_ms) > COMM_UART_WATCHDOG_IDLE_MS)
     {
       g_fault_code = 3;
     }
