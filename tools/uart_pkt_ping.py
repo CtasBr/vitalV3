@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""M4: binary PKT_PING / PKT_PONG over COBS (60 B raw + CRC16-CCITT)."""
+"""M4: binary PKT_PING / PKT_PONG over COBS (54 B raw + CRC16-CCITT)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ except ImportError:
 
 PKT_MAGIC = 0x56
 PKT_VERSION = 1
-PKT_RAW_SIZE = 60
+PKT_RAW_SIZE = 54
 PKT_PING = 0x01
 PKT_PONG = 0x02
 

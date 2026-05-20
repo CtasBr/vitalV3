@@ -2,7 +2,7 @@
 
 Transport: **COBS** framing + **CRC16-CCITT** (poly 0x1021, init 0xFFFF).
 
-## Raw packet (60 bytes, before COBS)
+## Raw packet (54 bytes, before COBS)
 
 | Offset | Size | Field |
 |--------|------|-------|
@@ -30,8 +30,8 @@ Transport: **COBS** framing + **CRC16-CCITT** (poly 0x1021, init 0xFFFF).
 
 ## COBS
 
-- Encoder replaces `0x00` in `[raw 60 bytes]` → COBS codewords, terminates with `0x00`.
-- Max encoded length: 64 bytes + 1 delimiter.
+- Encoder replaces `0x00` in `[raw 54 bytes]` → COBS codewords, terminates with `0x00`.
+- Max encoded length: 60 bytes + 1 delimiter.
 
 ## M4 test
 

@@ -1,6 +1,6 @@
 /**
  * @file protocol.h
- * @brief M4: COBS + CRC16 binary packets (60 B raw).
+ * @brief M4: COBS + CRC16 binary packets (54 B raw).
  */
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
@@ -13,7 +13,7 @@ extern "C" {
 
 #define PKT_MAGIC 0x56U
 #define PKT_VERSION 1U
-#define PKT_RAW_SIZE 60U
+#define PKT_RAW_SIZE 54U
 #define PKT_PAYLOAD_MAX 44U
 #define PKT_COBS_MAX 70U
 
@@ -41,14 +41,14 @@ typedef struct __attribute__((packed)) {
 
 uint16_t protocol_crc16(const uint8_t *data, uint32_t len);
 
-/** Build raw packet in @p out (60 bytes). Returns 0 on success. */
+/** Build raw packet in @p out (54 bytes). Returns 0 on success. */
 int protocol_build(pkt_raw_t *out, pkt_type_t type, uint16_t seq, const uint8_t *payload,
                    uint16_t payload_len);
 
 /** Validate CRC and magic. Returns 0 if OK. */
 int protocol_validate(const pkt_raw_t *pkt);
 
-/** COBS encode raw 60B → wire buffer. Returns encoded length (excl. trailing 0). */
+/** COBS encode raw 54B → wire buffer. Returns encoded length (excl. trailing 0). */
 uint32_t protocol_cobs_encode(const uint8_t *raw, uint32_t raw_len, uint8_t *out,
                               uint32_t out_max);
 
