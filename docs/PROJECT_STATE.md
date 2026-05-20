@@ -167,6 +167,8 @@ python3 tools/uart_pkt_heartbeat.py   # M6 heartbeat echo
 python3 tools/uart_pkt_estop.py       # M6 estop -> fault
 ```
 
+Примечание: после включения `PKT_TELEMETRY` скрипт `uart_pkt_ping.py` должен игнорировать тип `0x20` и ждать `PKT_PONG`.
+
 ---
 
 ## Git

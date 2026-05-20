@@ -20,6 +20,7 @@ PKT_VERSION = 1
 PKT_RAW_SIZE = 54
 PKT_PING = 0x01
 PKT_PONG = 0x02
+PKT_TELEMETRY = 0x20
 
 
 def crc16_ccitt(data: bytes) -> int:
@@ -153,6 +154,9 @@ def main() -> None:
                 ptype, seq = parse_raw(reply)
             except ValueError as exc:
                 print(f"skip frame: {exc}", flush=True)
+                continue
+
+            if ptype == PKT_TELEMETRY:
                 continue
 
             if ptype == PKT_PING:
