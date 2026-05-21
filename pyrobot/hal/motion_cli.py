@@ -95,12 +95,20 @@ def _run_via_daemon(cfg: RobotConfig, cmd: MotionCommand, timeout_s: float) -> N
                 return
 
         reply = client.send_command(cmd)
-        seg = reply.segment_id_active
-        if seg is None or seg == 0:
-            _print_json(reply)
+        if reply.cmd_rejected:
+            print(
+                json.dumps(
+                    {"error": "cmd_rejected", "fault_message": reply.fault_message},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return
-        final = client.wait_done(seg, timeout_s=timeout_s)
-        _print_json(final)
+        if cmd.kind in ("home", "g28", "linear_move", "gcode", "move_joints"):
+            final = client.wait_move_busy(timeout_s=timeout_s)
+            _print_json(final)
+            return
+        _print_json(reply)
 
 
 def _run_via_bus(bus: object, cmd_name: str, args: argparse.Namespace, cfg: RobotConfig) -> None:

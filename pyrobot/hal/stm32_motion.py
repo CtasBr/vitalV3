@@ -6,6 +6,7 @@ import time
 from collections.abc import Iterable
 
 import serial
+import structlog
 
 from proto.motion import MotionState, MoveSegment, SegmentId
 from pyrobot.config.load_config import RobotConfig, load_config
@@ -24,6 +25,8 @@ from pyrobot.motion.planner import (
     plan_pose_move,
 )
 from pyrobot.motion.segment_chain import plan_joint_move_chain, split_move_segment
+log = structlog.get_logger(node="stm32_motion")
+
 from pyrobot.hal.stm32_protocol import (
     PKT_ESTOP,
     PKT_FAULT,
@@ -371,6 +374,9 @@ class Stm32MotionBus(MotionBus):
         q_cur = list(self.state.q_enc_deg)
         q_tgt = list(self._cfg.encoders.home_deg)
         seg = plan_home_move(q_cur, self._cfg)
+        if all(s == 0 for s in seg.axis_steps):
+            log.info("home_already_at_target", q_enc_deg=q_cur, home_deg=q_tgt)
+            return 0
         segments = split_move_segment(seg, self._cfg.motion.max_steps_per_segment)
         return self._execute_segment_chain(segments, q_cur, q_tgt)
 
@@ -405,6 +411,8 @@ class Stm32MotionBus(MotionBus):
 
         if all(s == 0 for s in steps):
             return 0
+
+        self._last_state = self._last_state.model_copy(update={"segment_id_done": None})
 
         payload = struct.pack(
             "<iiiiIIII",

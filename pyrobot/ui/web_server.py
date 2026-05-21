@@ -79,10 +79,21 @@ def create_app(cache: RobotStateCache | None = None) -> FastAPI:
                         raise HTTPException(400, "unsupported gcode line")
                     cmd = sub
                 reply = client.send_command(cmd.model_copy(update={"node": "web"}))
-                seg = reply.segment_id_active
-                if seg is not None and seg != 0:
-                    final = client.wait_done(seg, timeout_s=120.0)
-                    return {"ok": True, "segment_id": seg, "motion": final.model_dump(mode="json")}
+                if reply.cmd_rejected:
+                    raise HTTPException(
+                        409,
+                        reply.fault_message or "robot busy (previous move still running)",
+                    )
+                if cmd.kind in ("home", "g28", "linear_move", "gcode", "move_joints"):
+                    final = client.wait_move_busy(timeout_s=120.0)
+                    if final.fault_code != 0:
+                        return {
+                            "ok": False,
+                            "fault_code": final.fault_code,
+                            "fault_message": final.fault_message,
+                            "motion": final.model_dump(mode="json"),
+                        }
+                    return {"ok": True, "motion": final.model_dump(mode="json")}
                 return {"ok": True, "motion": reply.model_dump(mode="json")}
         except TimeoutError as exc:
             raise HTTPException(504, f"motion timeout: {exc}") from exc

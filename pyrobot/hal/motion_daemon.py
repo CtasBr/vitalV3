@@ -23,17 +23,6 @@ from pyrobot.motion.planner import feed_for_linear
 log = structlog.get_logger(node="motion_daemon")
 
 
-def _fresh_state(bus: MotionBus, *, segment_id_active: SegmentId | None = None) -> MotionState:
-    st = bus.state
-    update: dict[str, object] = {
-        "node": "motion_daemon",
-        "timestamp_ns": time.time_ns(),
-    }
-    if segment_id_active is not None:
-        update["segment_id_active"] = segment_id_active
-    return st.model_copy(update=update)
-
-
 def _dispatch_motion(bus: MotionBus, cmd: MotionCommand) -> SegmentId | None:
     """Execute motion command; return segment id if a move was started."""
     if isinstance(bus, Stm32MotionBus) and bus.state.fault_code != 0:
@@ -88,17 +77,44 @@ def _dispatch_motion(bus: MotionBus, cmd: MotionCommand) -> SegmentId | None:
 
 _MOVE_KINDS = frozenset({"home", "g28", "linear_move", "gcode", "move_joints"})
 _move_slot = threading.Lock()
+_move_busy = threading.Event()
+
+
+def _fresh_state(bus: MotionBus, *, segment_id_active: SegmentId | None = None) -> MotionState:
+    st = bus.state
+    update: dict[str, object] = {
+        "node": "motion_daemon",
+        "timestamp_ns": time.time_ns(),
+        "move_busy": _move_busy.is_set(),
+    }
+    if segment_id_active is not None:
+        update["segment_id_active"] = segment_id_active
+    return st.model_copy(update=update)
 
 
 def _run_move_async(bus: MotionBus, cmd: MotionCommand) -> None:
     try:
+        if isinstance(bus, Stm32MotionBus):
+            if bus.state.fault_code != 0:
+                bus.reset_fault()
+            bus.pump(0.15)
+            bus.tick_heartbeat()
         seg = _dispatch_motion(bus, cmd)
         if isinstance(bus, Stm32MotionBus):
             bus.pump(0.1)
-        log.info("move_async_done", cmd=cmd.kind, segment_id=seg, fault=bus.state.fault_code)
+        if seg in (None, 0):
+            log.warning(
+                "move_async_noop",
+                cmd=cmd.kind,
+                fault=bus.state.fault_code,
+                hint="already at target, MCU fault, or zero step plan",
+            )
+        else:
+            log.info("move_async_done", cmd=cmd.kind, segment_id=seg, fault=bus.state.fault_code)
     except Exception as exc:
         log.error("move_async_failed", cmd=cmd.kind, error=str(exc))
     finally:
+        _move_busy.clear()
         _move_slot.release()
 
 
@@ -106,6 +122,7 @@ def _start_move_async(bus: MotionBus, cmd: MotionCommand) -> bool:
     if not _move_slot.acquire(blocking=False):
         log.warning("move_rejected_already_running", cmd=cmd.kind)
         return False
+    _move_busy.set()
     threading.Thread(
         target=_run_move_async,
         args=(bus, cmd),
@@ -282,17 +299,20 @@ def main() -> None:
                         bus.reset_fault()
                         bus.pump(0.05)
                     if _start_move_async(bus, cmd):
-                        st = _fresh_state(bus)
                         rep.send_reply(
-                            st.model_copy(
-                                update={
-                                    "in_motion": True,
-                                    "segment_id_active": st.segment_id_active or 1,
-                                }
+                            _fresh_state(bus).model_copy(
+                                update={"move_busy": True, "cmd_rejected": False}
                             )
                         )
                     else:
-                        rep.send_reply(_fresh_state(bus))
+                        rep.send_reply(
+                            _fresh_state(bus).model_copy(
+                                update={
+                                    "cmd_rejected": True,
+                                    "fault_message": "busy: previous move still running",
+                                }
+                            )
+                        )
                 else:
                     seg = _dispatch_motion(bus, cmd)
                     if isinstance(bus, Stm32MotionBus):

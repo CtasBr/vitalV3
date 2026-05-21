@@ -57,39 +57,43 @@ class MotionZmqClient:
     def state(self) -> MotionState | None:
         return self._sub.recv_model(MotionState, timeout_ms=200)
 
-    def wait_done(self, segment_id: int | None, timeout_s: float = 30.0) -> MotionState:
+    def wait_move_busy(self, timeout_s: float = 120.0) -> MotionState:
+        """
+        Wait until motion_daemon finishes an async move (move_busy cleared).
+        Handles multi-segment chains; ignores stale segment_id_done.
+        """
         deadline = time.monotonic() + timeout_s
         last: MotionState | None = None
-        saw_motion = False
-
-        if segment_id is None:
-            while time.monotonic() < deadline:
-                st = self._sub.recv_model(MotionState, timeout_ms=200)
-                if st is None:
-                    continue
-                last = st
-                if st.in_motion:
-                    saw_motion = True
-                elif saw_motion or st.fault_code != 0:
-                    return st
-            if last is not None:
-                return last
-            raise TimeoutError("motion did not complete")
+        saw_busy = False
+        idle_ticks = 0
+        started_at = time.monotonic()
 
         while time.monotonic() < deadline:
             st = self._sub.recv_model(MotionState, timeout_ms=200)
             if st is None:
                 continue
             last = st
+            if st.cmd_rejected:
+                return st
             if st.fault_code != 0:
                 return st
-            if st.segment_id_active == segment_id or st.in_motion:
-                saw_motion = True
-            if st.segment_id_done == segment_id:
-                return st
-            if saw_motion and not st.in_motion:
+            if st.move_busy or st.in_motion:
+                saw_busy = True
+                idle_ticks = 0
+                continue
+            if saw_busy:
+                idle_ticks += 1
+                if idle_ticks >= 3:
+                    return st
+            elif time.monotonic() - started_at > 0.8:
+                # Zero-step / instant noop: never went busy.
                 return st
 
         if last is not None:
             return last
-        raise TimeoutError(f"segment {segment_id} did not complete within {timeout_s}s")
+        raise TimeoutError(f"motion did not complete within {timeout_s}s")
+
+    def wait_done(self, segment_id: int | None, timeout_s: float = 30.0) -> MotionState:
+        """Wait for motion_daemon async move (segment_id in reply is not reliable)."""
+        del segment_id
+        return self.wait_move_busy(timeout_s=timeout_s)

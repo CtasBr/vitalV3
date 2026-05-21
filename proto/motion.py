@@ -55,6 +55,8 @@ class MotionState(SchemaHeader):
     q_enc_deg: list[float] = Field(default_factory=lambda: [90.0, 90.0, 0.0, 0.0])
     q_vel_deg_s: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
     in_motion: bool = False
+    move_busy: bool = False
+    cmd_rejected: bool = False
     segment_id_active: SegmentId | None = None
     segment_id_done: SegmentId | None = None
     fault_code: int = 0

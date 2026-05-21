@@ -161,7 +161,11 @@ function updateUi(data) {
   if (yoloLine) yoloLine.textContent = formatYoloLine(vis);
 
   const fc = m.fault_code || 0;
-  conn.textContent = fc ? `FAULT ${fc}` : m.in_motion ? "MOVING" : "OK";
+  conn.textContent = fc
+    ? `FAULT ${fc}`
+    : m.move_busy || m.in_motion
+      ? "MOVING"
+      : "OK";
   conn.className = "badge " + (fc ? "fault" : "ok");
 
   drawArm(data);
