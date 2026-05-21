@@ -71,6 +71,7 @@ class Stm32MotionBus(MotionBus):
         self._encoder_bus: ExternalEncoderBus | None = None
         self._encoder_zmq: EncoderZmqClient | None = None
         self._uart_lock = threading.RLock()
+        self._last_move_error = ""
 
     def set_encoder_zmq(self, client: EncoderZmqClient) -> None:
         """Use ZMQ encoders.state for A/B (from encoder_daemon). Does not open UART encoder ports."""
@@ -139,6 +140,7 @@ class Stm32MotionBus(MotionBus):
         if pkt_type == PKT_SEGMENT_DONE:
             done = list(struct.unpack("<iiii", payload[:16])) if len(payload) >= 16 else [0, 0, 0, 0]
             self._last_done = (seq, done)
+            self._last_move_error = ""
             self._last_state = self._last_state.model_copy(
                 update={"segment_id_done": seq, "in_motion": False}
             )
@@ -413,7 +415,11 @@ class Stm32MotionBus(MotionBus):
         if all(s == 0 for s in steps):
             return 0
 
+        self._last_move_error = ""
         self._last_state = self._last_state.model_copy(update={"segment_id_done": None})
+        with self._uart_lock:
+            if self._ser.is_open:
+                self._ser.reset_input_buffer()
 
         payload = struct.pack(
             "<iiiiIIII",
@@ -459,15 +465,14 @@ class Stm32MotionBus(MotionBus):
             )
 
     def wait_done(self, segment_id: SegmentId, timeout_s: float = 30.0) -> MotionState:
+        """Block until PKT_SEGMENT_DONE with matching seq (do not guess from telemetry)."""
         deadline = time.monotonic() + timeout_s
         next_hb_at = 0.0
-        saw_moving = False
         while time.monotonic() < deadline:
             if is_cancelled():
                 log.warning("wait_done_cancelled", segment_id=segment_id)
                 return self._last_state
             now = time.monotonic()
-            # Keep firmware watchdog satisfied while waiting for segment completion.
             if now >= next_hb_at:
                 self._send_packet(
                     PKT_HEARTBEAT, struct.pack("<I", int(time.time() * 1000) & 0xFFFFFFFF)
@@ -479,17 +484,20 @@ class Stm32MotionBus(MotionBus):
                 return st
             if st.segment_id_done == segment_id:
                 return st
-            if st.in_motion:
-                saw_moving = True
-            elif saw_moving:
-                log.warning(
-                    "wait_done_idle_no_ack",
-                    segment_id=segment_id,
-                    segment_id_done=st.segment_id_done,
-                )
-                return st
+        self._last_move_error = (
+            f"SEGMENT_DONE timeout ({timeout_s:.0f}s) for segment {segment_id}. "
+            "MCU did not ack (motors may be stuck). "
+            f"Test: python tools/uart_pkt_step.py {self._cfg.motion.port} 200"
+        )
         log.error("wait_done_timeout", segment_id=segment_id, timeout_s=timeout_s)
-        return self._last_state
+        try:
+            self.estop()
+            self.pump(0.15)
+        except (serial.SerialException, OSError) as exc:
+            log.warning("estop_after_segment_timeout_failed", error=str(exc))
+        return self._last_state.model_copy(
+            update={"fault_message": self._last_move_error, "in_motion": False}
+        )
 
     def estop(self) -> None:
         self._send_packet(PKT_ESTOP)

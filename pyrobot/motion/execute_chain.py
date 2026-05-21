@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import structlog
+
 from proto.motion import MoveSegment, MotionState
 from pyrobot.config.load_config import RobotConfig
 from pyrobot.hal.move_control import is_cancelled
+
+log = structlog.get_logger(node="execute_chain")
 from pyrobot.motion.segment_chain import (
     ab_closed_loop_step_correction,
     apply_ab_correction_to_segment,
@@ -54,6 +58,13 @@ def execute_segment_chain(
             if corr_a or corr_b:
                 seg = apply_ab_correction_to_segment(seg, corr_a, corr_b)
 
+        log.info(
+            "move_segment_start",
+            index=idx,
+            total=n,
+            planner_segment_id=seg.segment_id,
+            steps=seg.axis_steps,
+        )
         seg_id = bus.move_steps(seg.axis_steps, seg.period_us)  # type: ignore[attr-defined]
         if seg_id == 0:
             continue
@@ -61,10 +72,25 @@ def execute_segment_chain(
         if is_cancelled():
             return last_st
         if last_st.fault_code != 0:
+            log.error(
+                "move_segment_fault",
+                index=idx,
+                uart_seq=seg_id,
+                fault_code=last_st.fault_code,
+            )
             return last_st
         if last_st.segment_id_done != seg_id:
+            err = getattr(bus, "_last_move_error", "") or "SEGMENT_DONE mismatch"
+            log.error(
+                "move_segment_failed",
+                index=idx,
+                uart_seq=seg_id,
+                segment_id_done=last_st.segment_id_done,
+                error=err,
+            )
             return last_st
-        bus.pump(0.05)  # type: ignore[attr-defined]
+        log.info("move_segment_ok", index=idx, uart_seq=seg_id)
+        bus.pump(0.2)  # type: ignore[attr-defined]
         if hasattr(bus, "tick_heartbeat"):
             bus.tick_heartbeat()  # type: ignore[attr-defined]
 

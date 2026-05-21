@@ -62,3 +62,4 @@ class MotionState(SchemaHeader):
     segment_id_done: SegmentId | None = None
     fault_code: int = 0
     fault_message: str = ""
+    last_error: str = ""

@@ -90,11 +90,12 @@ def create_app(cache: RobotStateCache | None = None) -> FastAPI:
                         timeout_s=move_timeout,
                         expect_busy=reply.move_busy,
                     )
-                    if final.fault_code != 0:
+                    if final.fault_code != 0 or final.last_error:
                         return {
                             "ok": False,
                             "fault_code": final.fault_code,
-                            "fault_message": final.fault_message,
+                            "fault_message": final.fault_message or final.last_error,
+                            "last_error": final.last_error,
                             "motion": final.model_dump(mode="json"),
                         }
                     return {"ok": True, "motion": final.model_dump(mode="json")}

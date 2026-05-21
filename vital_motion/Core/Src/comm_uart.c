@@ -228,6 +228,13 @@ static void comm_uart_handle_binary(const pkt_raw_t *pkt)
       return;
     }
 
+    if (motor_any_in_motion())
+    {
+      g_fault_code = 2;
+      comm_uart_send_fault(pkt->seq, -1005);
+      return;
+    }
+
     if (motor_move_4axes(steps, arr) == 0)
     {
       g_fault_code = 0;

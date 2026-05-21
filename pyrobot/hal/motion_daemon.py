@@ -84,10 +84,12 @@ _move_started_mono: float = 0.0
 
 def _fresh_state(bus: MotionBus, *, segment_id_active: SegmentId | None = None) -> MotionState:
     st = bus.state
+    last_err = getattr(bus, "_last_move_error", "") or ""
     update: dict[str, object] = {
         "node": "motion_daemon",
         "timestamp_ns": time.time_ns(),
         "move_busy": _move_busy.is_set(),
+        "last_error": last_err,
     }
     if segment_id_active is not None:
         update["segment_id_active"] = segment_id_active
@@ -104,7 +106,16 @@ def _run_move_async(bus: MotionBus, cmd: MotionCommand) -> None:
         seg = _dispatch_motion(bus, cmd)
         if isinstance(bus, Stm32MotionBus):
             bus.pump(0.1)
-        if seg in (None, 0):
+        last_err = getattr(bus, "_last_move_error", "") or ""
+        if last_err:
+            log.error(
+                "move_async_failed",
+                cmd=cmd.kind,
+                segment_id=seg,
+                fault=bus.state.fault_code,
+                error=last_err,
+            )
+        elif seg in (None, 0):
             log.warning(
                 "move_async_noop",
                 cmd=cmd.kind,
