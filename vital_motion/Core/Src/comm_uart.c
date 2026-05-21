@@ -161,6 +161,11 @@ static void comm_uart_handle_binary(const pkt_raw_t *pkt)
   {
     g_hb_seen = 1U;
     g_last_hb_ms = HAL_GetTick();
+    /* Host resumed keepalive — clear idle watchdog latch without RESET_FAULT. */
+    if (g_fault_code == 3U)
+    {
+      g_fault_code = 0U;
+    }
     comm_uart_send_heartbeat(pkt->seq);
     return;
   }

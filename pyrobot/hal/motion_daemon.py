@@ -212,7 +212,8 @@ def main() -> None:
     period = 1.0 / cfg.motion.telemetry_hz
     hb_interval = 1.0 / max(1, cfg.motion.heartbeat_hz)
     next_hb_at = 0.0
-    last_fault_log_at = 0.0
+    last_fault_log_at = time.monotonic()
+    boot_mono = time.monotonic()
 
     def _stm32_keepalive(bus_stm: Stm32MotionBus, *, drain_s: float = 0.05) -> None:
         bus_stm.tick_heartbeat()
@@ -246,9 +247,13 @@ def main() -> None:
                 log.info("mcu_heartbeat_ok")
             else:
                 log.warning("mcu_heartbeat_no_echo", port=cfg.motion.port)
-            for _ in range(5):
-                _stm32_keepalive(bus)
-                time.sleep(hb_interval)
+            # Burst HB after (re)connect so MCU idle watchdog does not latch fault 3.
+            warm_interval = min(0.05, hb_interval)
+            for _ in range(40):
+                _stm32_keepalive(bus, drain_s=0.03)
+                time.sleep(warm_interval)
+            bus.pump(0.1)
+            next_hb_at = time.monotonic()
             log.info("heartbeat_keepalive_started", hz=cfg.motion.heartbeat_hz, interval_s=hb_interval)
 
         while running:
@@ -290,11 +295,20 @@ def main() -> None:
 
             pub.publish(st)
             if st.fault_code != 0 and time.monotonic() - last_fault_log_at > 2.0:
-                log.warning(
-                    "mcu_fault_telemetry",
-                    fault_code=st.fault_code,
-                    fault_message=st.fault_message,
-                )
+                age = time.monotonic() - boot_mono
+                if st.fault_code == 3 and age < 10.0:
+                    log.info(
+                        "mcu_watchdog_fault_boot",
+                        fault_code=st.fault_code,
+                        age_s=round(age, 2),
+                        hint="cleared on next HB; reflash MCU if this persists",
+                    )
+                else:
+                    log.warning(
+                        "mcu_fault_telemetry",
+                        fault_code=st.fault_code,
+                        fault_message=st.fault_message,
+                    )
                 last_fault_log_at = time.monotonic()
 
             if rep.poll(0):
