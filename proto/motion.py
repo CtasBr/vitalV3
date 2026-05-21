@@ -31,6 +31,7 @@ class MotionCommand(SchemaHeader):
         "gcode",
         "reset_fault",
         "reload_encoders",
+        "cancel_move",
     ] = "move_joints"
     target_q_deg: list[float] | None = Field(default=None, min_length=4, max_length=4)
     target_pose_mm: list[float] | None = Field(

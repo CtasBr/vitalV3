@@ -85,7 +85,11 @@ def create_app(cache: RobotStateCache | None = None) -> FastAPI:
                         reply.fault_message or "robot busy (previous move still running)",
                     )
                 if cmd.kind in ("home", "g28", "linear_move", "gcode", "move_joints"):
-                    final = client.wait_move_busy(timeout_s=120.0)
+                    move_timeout = float(cfg.motion.move_timeout_s) + 15.0
+                    final = client.wait_move_busy(
+                        timeout_s=move_timeout,
+                        expect_busy=reply.move_busy,
+                    )
                     if final.fault_code != 0:
                         return {
                             "ok": False,
@@ -95,6 +99,8 @@ def create_app(cache: RobotStateCache | None = None) -> FastAPI:
                         }
                     return {"ok": True, "motion": final.model_dump(mode="json")}
                 return {"ok": True, "motion": reply.model_dump(mode="json")}
+        except HTTPException:
+            raise
         except TimeoutError as exc:
             raise HTTPException(504, f"motion timeout: {exc}") from exc
         except Exception as exc:
@@ -108,8 +114,17 @@ def create_app(cache: RobotStateCache | None = None) -> FastAPI:
     def api_home() -> dict[str, Any]:
         return _send_motion(MotionCommand(kind="home", node="web"))
 
+    @app.post("/api/cancel-move")
+    def api_cancel_move() -> dict[str, Any]:
+        return _send_motion(MotionCommand(kind="cancel_move", node="web"))
+
     @app.post("/api/reset-fault")
     def api_reset_fault() -> dict[str, Any]:
+        try:
+            with MotionZmqClient(cfg) as client:
+                client.send_command(MotionCommand(kind="cancel_move", node="web"))
+        except Exception:
+            pass
         return _send_motion(MotionCommand(kind="reset_fault", node="web"))
 
     @app.post("/api/estop")

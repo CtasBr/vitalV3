@@ -29,6 +29,8 @@ motion:
   closed_loop_ab_gain: 1.0
   closed_loop_max_corr_deg: 4.0
   mcu_watchdog_idle_ms: 2500   # fault 3, если нет HB в простое (прошивка)
+  move_timeout_s: 50           # принудительный сброс зависшего async-move (host)
+  segment_wait_timeout_s: 35     # ждать SEGMENT_DONE (MCU motor timeout ≈30s/ось)
   # Знак шагов vs рост угла энкодера (A инвертирована на MCU; B — на проводке)
   step_sign:
     a: 1

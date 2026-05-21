@@ -57,16 +57,22 @@ class MotionZmqClient:
     def state(self) -> MotionState | None:
         return self._sub.recv_model(MotionState, timeout_ms=200)
 
-    def wait_move_busy(self, timeout_s: float = 120.0) -> MotionState:
+    def wait_move_busy(
+        self,
+        timeout_s: float = 120.0,
+        *,
+        expect_busy: bool = False,
+    ) -> MotionState:
         """
         Wait until motion_daemon finishes an async move (move_busy cleared).
-        Handles multi-segment chains; ignores stale segment_id_done.
+        When expect_busy is True (daemon accepted the command), do not return
+        until move_busy was seen and cleared — avoids false 'done' while the
+        worker is still blocked in wait_done().
         """
         deadline = time.monotonic() + timeout_s
         last: MotionState | None = None
         saw_busy = False
         idle_ticks = 0
-        started_at = time.monotonic()
 
         while time.monotonic() < deadline:
             st = self._sub.recv_model(MotionState, timeout_ms=200)
@@ -85,15 +91,20 @@ class MotionZmqClient:
                 idle_ticks += 1
                 if idle_ticks >= 3:
                     return st
-            elif time.monotonic() - started_at > 0.8:
-                # Zero-step / instant noop: never went busy.
+            elif not expect_busy:
                 return st
 
         if last is not None:
             return last
         raise TimeoutError(f"motion did not complete within {timeout_s}s")
 
-    def wait_done(self, segment_id: int | None, timeout_s: float = 30.0) -> MotionState:
+    def wait_done(
+        self,
+        segment_id: int | None,
+        timeout_s: float = 30.0,
+        *,
+        expect_busy: bool = False,
+    ) -> MotionState:
         """Wait for motion_daemon async move (segment_id in reply is not reliable)."""
         del segment_id
-        return self.wait_move_busy(timeout_s=timeout_s)
+        return self.wait_move_busy(timeout_s=timeout_s, expect_busy=expect_busy)

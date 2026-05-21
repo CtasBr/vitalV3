@@ -18,6 +18,7 @@ from pyrobot.hal.motion_bus import MotionBus
 from pyrobot.hal.stm32_motion import Stm32MotionBus
 from pyrobot.behaviour.gcode import gcode_to_motion_command
 from pyrobot.hal.zmq_bus import ZmqPublisher, ZmqReplyServer
+from pyrobot.hal.move_control import clear_cancel, is_cancelled, request_cancel
 from pyrobot.motion.planner import feed_for_linear
 
 log = structlog.get_logger(node="motion_daemon")
@@ -78,6 +79,7 @@ def _dispatch_motion(bus: MotionBus, cmd: MotionCommand) -> SegmentId | None:
 _MOVE_KINDS = frozenset({"home", "g28", "linear_move", "gcode", "move_joints"})
 _move_slot = threading.Lock()
 _move_busy = threading.Event()
+_move_started_mono: float = 0.0
 
 
 def _fresh_state(bus: MotionBus, *, segment_id_active: SegmentId | None = None) -> MotionState:
@@ -114,15 +116,33 @@ def _run_move_async(bus: MotionBus, cmd: MotionCommand) -> None:
     except Exception as exc:
         log.error("move_async_failed", cmd=cmd.kind, error=str(exc))
     finally:
+        global _move_started_mono
+        clear_cancel()
         _move_busy.clear()
+        _move_started_mono = 0.0
         _move_slot.release()
 
 
+def _force_release_move(bus: MotionBus, *, reason: str) -> None:
+    """Request cancel + estop; move thread releases _move_slot in its finally."""
+    log.error("move_force_release", reason=reason)
+    request_cancel()
+    if isinstance(bus, Stm32MotionBus):
+        try:
+            bus.estop()
+            bus.pump(0.2)
+        except Exception as exc:
+            log.warning("move_force_release_estop_failed", error=str(exc))
+
+
 def _start_move_async(bus: MotionBus, cmd: MotionCommand) -> bool:
+    global _move_started_mono
     if not _move_slot.acquire(blocking=False):
         log.warning("move_rejected_already_running", cmd=cmd.kind)
         return False
+    clear_cancel()
     _move_busy.set()
+    _move_started_mono = time.monotonic()
     threading.Thread(
         target=_run_move_async,
         args=(bus, cmd),
@@ -263,6 +283,11 @@ def main() -> None:
                 _recover_watchdog_fault(bus)
                 st = _fresh_state(bus)
 
+            if _move_busy.is_set() and _move_started_mono > 0.0:
+                elapsed = time.monotonic() - _move_started_mono
+                if elapsed > cfg.motion.move_timeout_s:
+                    _force_release_move(bus, reason=f"host_timeout_{elapsed:.0f}s")
+
             pub.publish(st)
             if st.fault_code != 0 and time.monotonic() - last_fault_log_at > 2.0:
                 log.warning(
@@ -293,6 +318,9 @@ def main() -> None:
                     bus.stream_segments([cmd.segment])
                     if isinstance(bus, Stm32MotionBus):
                         bus.pump(0.05)
+                    rep.send_reply(_fresh_state(bus))
+                elif cmd.kind == "cancel_move":
+                    _force_release_move(bus, reason="user_cancel")
                     rep.send_reply(_fresh_state(bus))
                 elif cmd.kind in _MOVE_KINDS:
                     if isinstance(bus, Stm32MotionBus) and bus.state.fault_code != 0:

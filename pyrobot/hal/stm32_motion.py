@@ -12,6 +12,7 @@ from proto.motion import MotionState, MoveSegment, SegmentId
 from pyrobot.config.load_config import RobotConfig, load_config
 from pyrobot.hal.encoder_bus import ExternalEncoderBus
 from pyrobot.hal.encoder_offsets import load_offsets, save_offsets
+from pyrobot.hal.move_control import is_cancelled
 from pyrobot.hal.encoder_zmq import EncoderZmqClient
 from pyrobot.hal.fault_codes import mcu_fault_message
 from pyrobot.hal.motion_bus import MotionBus
@@ -426,6 +427,12 @@ class Stm32MotionBus(MotionBus):
             arr[3],
         )
         seg_id = self._send_packet(PKT_MOVE_SEGMENT, payload)
+        log.info(
+            "move_segment_tx",
+            segment_id=seg_id,
+            steps=steps,
+            period_us=arr,
+        )
         q_cur = list(self.state.q_enc_deg)
         q_cmd = [q_cur[i] + steps[i] * self._cfg.kinematics.deg_per_step for i in range(4)]
         self._last_state = self._last_state.model_copy(
@@ -454,7 +461,11 @@ class Stm32MotionBus(MotionBus):
     def wait_done(self, segment_id: SegmentId, timeout_s: float = 30.0) -> MotionState:
         deadline = time.monotonic() + timeout_s
         next_hb_at = 0.0
+        saw_moving = False
         while time.monotonic() < deadline:
+            if is_cancelled():
+                log.warning("wait_done_cancelled", segment_id=segment_id)
+                return self._last_state
             now = time.monotonic()
             # Keep firmware watchdog satisfied while waiting for segment completion.
             if now >= next_hb_at:
@@ -468,6 +479,16 @@ class Stm32MotionBus(MotionBus):
                 return st
             if st.segment_id_done == segment_id:
                 return st
+            if st.in_motion:
+                saw_moving = True
+            elif saw_moving:
+                log.warning(
+                    "wait_done_idle_no_ack",
+                    segment_id=segment_id,
+                    segment_id_done=st.segment_id_done,
+                )
+                return st
+        log.error("wait_done_timeout", segment_id=segment_id, timeout_s=timeout_s)
         return self._last_state
 
     def estop(self) -> None:

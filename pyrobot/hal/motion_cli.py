@@ -105,7 +105,10 @@ def _run_via_daemon(cfg: RobotConfig, cmd: MotionCommand, timeout_s: float) -> N
             )
             return
         if cmd.kind in ("home", "g28", "linear_move", "gcode", "move_joints"):
-            final = client.wait_move_busy(timeout_s=timeout_s)
+            final = client.wait_move_busy(
+                timeout_s=timeout_s,
+                expect_busy=reply.move_busy,
+            )
             _print_json(final)
             return
         _print_json(reply)
