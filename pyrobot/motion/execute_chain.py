@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+import time
+
 import structlog
 
 from proto.motion import MoveSegment, MotionState
 from pyrobot.config.load_config import RobotConfig
 from pyrobot.hal.move_control import is_cancelled
-
-log = structlog.get_logger(node="execute_chain")
 from pyrobot.motion.segment_chain import (
     ab_closed_loop_step_correction,
     apply_ab_correction_to_segment,
     chain_waypoints,
     split_move_segment,
 )
+
+log = structlog.get_logger(node="execute_chain")
 
 
 def execute_segment_chain(
@@ -42,8 +44,10 @@ def execute_segment_chain(
     max_corr = cfg.motion.closed_loop_max_corr_deg
 
     last_st: MotionState = bus.state  # type: ignore[attr-defined]
+    completed = 0
     for idx, raw_seg in enumerate(segments):
         if is_cancelled():
+            log.warning("move_chain_cancelled", completed=completed, total=n)
             return last_st
         seg = raw_seg
         if cfg.motion.closed_loop_ab and idx > 0:
@@ -70,6 +74,7 @@ def execute_segment_chain(
             continue
         last_st = bus.wait_done(seg_id, timeout_s=seg_timeout)  # type: ignore[attr-defined]
         if is_cancelled():
+            log.warning("move_chain_cancelled", completed=completed, total=n)
             return last_st
         if last_st.fault_code != 0:
             log.error(
@@ -77,6 +82,8 @@ def execute_segment_chain(
                 index=idx,
                 uart_seq=seg_id,
                 fault_code=last_st.fault_code,
+                completed=completed,
+                total=n,
             )
             return last_st
         if last_st.segment_id_done != seg_id:
@@ -86,12 +93,23 @@ def execute_segment_chain(
                 index=idx,
                 uart_seq=seg_id,
                 segment_id_done=last_st.segment_id_done,
+                completed=completed,
+                total=n,
                 error=err,
             )
             return last_st
-        log.info("move_segment_ok", index=idx, uart_seq=seg_id)
+        completed += 1
+        log.info("move_segment_ok", index=idx, uart_seq=seg_id, completed=completed, total=n)
         bus.pump(0.2)  # type: ignore[attr-defined]
         if hasattr(bus, "tick_heartbeat"):
             bus.tick_heartbeat()  # type: ignore[attr-defined]
+        if idx + 1 < n:
+            time.sleep(0.08)
+
+    if completed < n:
+        err = f"chain incomplete {completed}/{n}"
+        if hasattr(bus, "_last_move_error"):
+            bus._last_move_error = err  # type: ignore[attr-defined]
+        log.error("move_chain_incomplete", completed=completed, total=n)
 
     return last_st

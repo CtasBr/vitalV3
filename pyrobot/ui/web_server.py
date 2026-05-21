@@ -85,7 +85,11 @@ def create_app(cache: RobotStateCache | None = None) -> FastAPI:
                         reply.fault_message or "robot busy (previous move still running)",
                     )
                 if cmd.kind in ("home", "g28", "linear_move", "gcode", "move_joints"):
-                    move_timeout = float(cfg.motion.move_timeout_s) + 15.0
+                    # G28/G1 may be several MCU segments (each up to segment_wait_timeout_s).
+                    move_timeout = max(
+                        float(cfg.motion.move_timeout_s) + 15.0,
+                        8.0 * float(cfg.motion.segment_wait_timeout_s) + 30.0,
+                    )
                     final = client.wait_move_busy(
                         timeout_s=move_timeout,
                         expect_busy=reply.move_busy,

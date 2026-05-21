@@ -44,7 +44,7 @@ class MotionConfig(BaseModel):
     closed_loop_ab_gain: float = 1.0
     closed_loop_max_corr_deg: float = 4.0
     mcu_watchdog_idle_ms: int = 2500
-    move_timeout_s: float = 50.0
+    move_timeout_s: float = 240.0
     segment_wait_timeout_s: float = 65.0
     soft_limits_steps: dict[str, tuple[int, int]] = Field(
         default_factory=lambda: {

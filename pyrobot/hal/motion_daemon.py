@@ -107,6 +107,10 @@ def _run_move_async(bus: MotionBus, cmd: MotionCommand) -> None:
         if isinstance(bus, Stm32MotionBus):
             bus.pump(0.1)
         last_err = getattr(bus, "_last_move_error", "") or ""
+        if is_cancelled() and not last_err:
+            last_err = "move cancelled (host timeout or new command)"
+            if isinstance(bus, Stm32MotionBus):
+                bus._last_move_error = last_err
         if last_err:
             log.error(
                 "move_async_failed",
@@ -136,7 +140,10 @@ def _run_move_async(bus: MotionBus, cmd: MotionCommand) -> None:
 
 def _force_release_move(bus: MotionBus, *, reason: str) -> None:
     """Request cancel + estop; move thread releases _move_slot in its finally."""
+    msg = f"move aborted: {reason}"
     log.error("move_force_release", reason=reason)
+    if isinstance(bus, Stm32MotionBus):
+        bus._last_move_error = msg
     request_cancel()
     if isinstance(bus, Stm32MotionBus):
         try:
