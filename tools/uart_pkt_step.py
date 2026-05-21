@@ -24,6 +24,7 @@ PKT_TELEMETRY = 0x20
 PKT_FAULT = 0x31
 PKT_RESET_FAULT = 0x32
 PKT_HEARTBEAT = 0x3F
+PKT_ESTOP = 0x30
 COBS_BUF_MAX = 200
 
 
@@ -142,6 +143,8 @@ def wait_for_done(
     buf = bytearray()
     deadline = time.time() + timeout_s
     last_progress = time.time()
+    n_telemetry = 0
+    n_skip = 0
     old_timeout = ser.timeout
     ser.timeout = 0.05
     try:
@@ -150,7 +153,10 @@ def wait_for_done(
             if not b:
                 if verbose and time.time() - last_progress > 5.0:
                     left = max(0.0, deadline - time.time())
-                    print(f"  … waiting for SEGMENT_DONE ({left:.0f}s left)")
+                    print(
+                        f"  … waiting ({left:.0f}s left, "
+                        f"telemetry={n_telemetry}, skip={n_skip})"
+                    )
                     last_progress = time.time()
                 continue
             if b[0] == 0:
@@ -162,10 +168,12 @@ def wait_for_done(
                     raw = cobs_decode(frame)
                     ptype, seq, payload_rx = parse_raw(raw)
                 except ValueError as exc:
+                    n_skip += 1
                     if verbose:
                         print(f"skip frame: {exc}")
                     continue
                 if ptype == PKT_TELEMETRY:
+                    n_telemetry += 1
                     continue
                 if ptype == PKT_FAULT:
                     code = struct.unpack("<i", payload_rx[:4])[0] if len(payload_rx) >= 4 else 0
@@ -183,15 +191,23 @@ def wait_for_done(
                     if len(payload_rx) >= 16
                     else (0, 0, 0, 0)
                 )
+                if verbose and (n_telemetry or n_skip):
+                    print(f"  rx stats: telemetry={n_telemetry}, skip={n_skip}")
                 return seq, done
             buf.extend(b)
             if len(buf) > COBS_BUF_MAX:
+                n_skip += 1
                 if verbose:
                     print("COBS resync: buffer overflow, clearing")
                 buf.clear()
     finally:
         ser.timeout = old_timeout
-    raise TimeoutError(f"no PKT_SEGMENT_DONE seq={want_seq} within {timeout_s:.0f}s")
+    hint = ""
+    if n_telemetry > 0 and n_skip == 0:
+        hint = " (MCU alive but no DONE — motor stuck? reflash + ESTOP)"
+    raise TimeoutError(
+        f"no PKT_SEGMENT_DONE seq={want_seq} within {timeout_s:.0f}s{hint}"
+    )
 
 
 def main() -> None:
@@ -229,6 +245,17 @@ def main() -> None:
         "--no-reset",
         action="store_true",
         help="skip PKT_RESET_FAULT before move",
+    )
+    p.add_argument(
+        "--no-estop",
+        action="store_true",
+        help="skip PKT_ESTOP before move (not recommended after direction change)",
+    )
+    p.add_argument(
+        "--pause-ms",
+        type=int,
+        default=300,
+        help="pause after prep before MOVE (DIR/setup)",
     )
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
@@ -268,6 +295,12 @@ def main() -> None:
                     print(f"drained {dropped} stale RX bytes")
                 ser.reset_input_buffer()
 
+            if not args.no_estop:
+                send_packet(ser, PKT_ESTOP, seq=seq - 3)
+                drain_rx(ser, 0.25)
+                if args.verbose:
+                    print("sent PKT_ESTOP (clear running/timers)")
+
             if not args.no_reset:
                 send_packet(ser, PKT_RESET_FAULT, seq=seq - 1)
                 drain_rx(ser, 0.2)
@@ -278,6 +311,9 @@ def main() -> None:
                     payload=struct.pack("<I", int(time.time() * 1000) & 0xFFFFFFFF),
                 )
                 drain_rx(ser, 0.1)
+
+            if args.pause_ms > 0:
+                time.sleep(args.pause_ms / 1000.0)
 
             send_packet(ser, PKT_MOVE_SEGMENT, seq=seq, payload=payload)
             print(

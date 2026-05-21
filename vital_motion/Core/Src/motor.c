@@ -83,11 +83,22 @@ static int motor_axis_start(uint8_t axis, int32_t steps, uint32_t tim_arr)
     tim_arr = 20000U;
   }
 
+  /* Safe restart: stop PWM/TIM and drain completion sem after previous move. */
+  if (ax->running)
+  {
+    ax->running = 0;
+    HAL_TIM_PWM_Stop(ax->htim, ax->channel);
+    HAL_TIM_Base_Stop_IT(ax->htim);
+  }
+  (void)osSemaphoreAcquire(g_done_sems[axis], 0);
+
   const uint32_t n = (steps > 0) ? (uint32_t)steps : (uint32_t)(-steps);
   const GPIO_PinState dir_pin = (steps > 0) ? GPIO_PIN_SET : GPIO_PIN_RESET;
   ax->dir_sign = (steps > 0) ? 1 : -1;
 
   HAL_GPIO_WritePin(ax->dir_port, ax->dir_pin, dir_pin);
+  /* Stepper DIR setup time before STEP (typ. a few µs; 1 ms is conservative). */
+  HAL_Delay(1);
 
   __HAL_TIM_SET_AUTORELOAD(ax->htim, tim_arr);
   __HAL_TIM_SET_COMPARE(ax->htim, ax->channel, tim_arr / 2U);
@@ -125,6 +136,7 @@ int motor_move_4axes(const int32_t steps[4], const uint32_t tim_arr[4])
     used[i] = 1;
     if (motor_axis_start(i, steps[i], tim_arr[i]) != 0)
     {
+      motor_estop_all();
       return -1;
     }
   }
@@ -146,9 +158,7 @@ int motor_move_4axes(const int32_t steps[4], const uint32_t tim_arr[4])
       waited_ms += 50U;
       if (waited_ms >= 30000U)
       {
-        g_axes[i].running = 0;
-        HAL_TIM_PWM_Stop(g_axes[i].htim, g_axes[i].channel);
-        HAL_TIM_Base_Stop_IT(g_axes[i].htim);
+        motor_estop_all();
         return -1;
       }
     }
