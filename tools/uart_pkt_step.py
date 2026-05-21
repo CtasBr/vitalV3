@@ -22,6 +22,9 @@ PKT_MOVE_SEGMENT = 0x10
 PKT_SEGMENT_DONE = 0x21
 PKT_TELEMETRY = 0x20
 PKT_FAULT = 0x31
+PKT_RESET_FAULT = 0x32
+PKT_HEARTBEAT = 0x3F
+COBS_BUF_MAX = 200
 
 
 def crc16_ccitt(data: bytes) -> int:
@@ -41,7 +44,7 @@ def build_raw(pkt_type: int, seq: int, payload: bytes = b"") -> bytes:
     raw[1] = PKT_VERSION
     raw[2] = pkt_type
     raw[3] = 0
-    struct.pack_into("<H", raw, 4, seq)
+    struct.pack_into("<H", raw, 4, seq & 0xFFFF)
     struct.pack_into("<H", raw, 6, len(payload))
     raw[8 : 8 + len(payload)] = payload
     struct.pack_into("<H", raw, 52, crc16_ccitt(raw[:52]))
@@ -89,21 +92,6 @@ def cobs_decode(data: bytes) -> bytes:
     return bytes(out)
 
 
-def read_cobs_frame(ser: serial.Serial, timeout: float = 2.0) -> bytes:
-    buf = bytearray()
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        b = ser.read(1)
-        if not b:
-            continue
-        if b[0] == 0:
-            if buf:
-                return cobs_decode(bytes(buf))
-            continue
-        buf.extend(b)
-    raise TimeoutError("no COBS frame")
-
-
 def parse_raw(raw: bytes) -> tuple[int, int, bytes]:
     if len(raw) != PKT_RAW_SIZE or raw[0] != PKT_MAGIC:
         raise ValueError("bad raw packet")
@@ -117,8 +105,99 @@ def parse_raw(raw: bytes) -> tuple[int, int, bytes]:
     return ptype, seq, bytes(raw[8 : 8 + plen])
 
 
+def drain_rx(ser: serial.Serial, duration_s: float = 0.25) -> int:
+    """Drop telemetry/leftovers so the next COBS frame starts clean."""
+    end = time.time() + duration_s
+    n = 0
+    old_timeout = ser.timeout
+    ser.timeout = 0.02
+    try:
+        while time.time() < end:
+            chunk = ser.read(ser.in_waiting or 1)
+            if chunk:
+                n += len(chunk)
+            else:
+                time.sleep(0.01)
+    finally:
+        ser.timeout = old_timeout
+    if ser.in_waiting:
+        n += len(ser.read(ser.in_waiting))
+    return n
+
+
+def send_packet(ser: serial.Serial, pkt_type: int, seq: int, payload: bytes = b"") -> None:
+    wire = cobs_encode(build_raw(pkt_type, seq, payload))
+    ser.write(wire)
+    ser.flush()
+
+
+def wait_for_done(
+    ser: serial.Serial,
+    want_seq: int,
+    timeout_s: float,
+    *,
+    verbose: bool,
+) -> tuple[int, tuple[int, int, int, int]]:
+    """Read UART until PKT_SEGMENT_DONE(want_seq) or PKT_FAULT."""
+    buf = bytearray()
+    deadline = time.time() + timeout_s
+    last_progress = time.time()
+    old_timeout = ser.timeout
+    ser.timeout = 0.05
+    try:
+        while time.time() < deadline:
+            b = ser.read(1)
+            if not b:
+                if verbose and time.time() - last_progress > 5.0:
+                    left = max(0.0, deadline - time.time())
+                    print(f"  … waiting for SEGMENT_DONE ({left:.0f}s left)")
+                    last_progress = time.time()
+                continue
+            if b[0] == 0:
+                if not buf:
+                    continue
+                frame = bytes(buf)
+                buf.clear()
+                try:
+                    raw = cobs_decode(frame)
+                    ptype, seq, payload_rx = parse_raw(raw)
+                except ValueError as exc:
+                    if verbose:
+                        print(f"skip frame: {exc}")
+                    continue
+                if ptype == PKT_TELEMETRY:
+                    continue
+                if ptype == PKT_FAULT:
+                    code = struct.unpack("<i", payload_rx[:4])[0] if len(payload_rx) >= 4 else 0
+                    raise RuntimeError(f"PKT_FAULT seq={seq} code={code}")
+                if ptype != PKT_SEGMENT_DONE:
+                    if verbose:
+                        print(f"skip pkt type=0x{ptype:02x} seq={seq}")
+                    continue
+                if seq != want_seq:
+                    if verbose:
+                        print(f"skip done seq={seq} (want {want_seq})")
+                    continue
+                done = (
+                    struct.unpack("<iiii", payload_rx[:16])
+                    if len(payload_rx) >= 16
+                    else (0, 0, 0, 0)
+                )
+                return seq, done
+            buf.extend(b)
+            if len(buf) > COBS_BUF_MAX:
+                if verbose:
+                    print("COBS resync: buffer overflow, clearing")
+                buf.clear()
+    finally:
+        ser.timeout = old_timeout
+    raise TimeoutError(f"no PKT_SEGMENT_DONE seq={want_seq} within {timeout_s:.0f}s")
+
+
 def main() -> None:
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(
+        description="Send one MOVE_SEGMENT and wait SEGMENT_DONE (bringup test)."
+    )
     p.add_argument("steps_a", type=int)
     p.add_argument("arr_a", type=int, nargs="?", default=5000)
     p.add_argument("--steps-b", type=int, default=0)
@@ -129,7 +208,29 @@ def main() -> None:
     p.add_argument("--arr-d", type=int, default=5000)
     p.add_argument("port", nargs="?", help="/dev/cu.usbmodem...")
     p.add_argument("-b", "--baud", type=int, default=115200)
-    p.add_argument("--seq", type=int, default=100)
+    p.add_argument(
+        "--seq",
+        type=int,
+        default=None,
+        help="packet seq (default: auto from time)",
+    )
+    p.add_argument(
+        "--timeout",
+        type=float,
+        default=65.0,
+        help="wait for SEGMENT_DONE (MCU up to ~30s per moving axis)",
+    )
+    p.add_argument(
+        "--no-drain",
+        action="store_true",
+        help="do not flush RX before/after (not recommended)",
+    )
+    p.add_argument(
+        "--no-reset",
+        action="store_true",
+        help="skip PKT_RESET_FAULT before move",
+    )
+    p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
 
     port = args.port
@@ -140,7 +241,10 @@ def main() -> None:
             raise SystemExit(1)
         port = ports[-1]
 
-    # 4-axis payload (B/C/D = 0 for current firmware stage)
+    seq = args.seq if args.seq is not None else (int(time.time() * 1000) & 0xFFFF)
+    if seq == 0:
+        seq = 1
+
     payload = struct.pack(
         "<iiiiIIII",
         args.steps_a,
@@ -152,56 +256,57 @@ def main() -> None:
         args.arr_c,
         args.arr_d,
     )
-    raw = build_raw(PKT_MOVE_SEGMENT, seq=args.seq, payload=payload)
-    wire = cobs_encode(raw)
 
     print(f"Using {port} @ {args.baud}")
-    with serial.Serial(port, args.baud, timeout=0.5) as ser:
-        time.sleep(0.2)
-        ser.reset_input_buffer()
-        ser.write(wire)
-        ser.flush()
+    print("Tip: stop motion_daemon first — only one process may use the port.")
+    try:
+        with serial.Serial(port, args.baud, timeout=0.5) as ser:
+            time.sleep(0.15)
+            if not args.no_drain:
+                dropped = drain_rx(ser, 0.3)
+                if args.verbose and dropped:
+                    print(f"drained {dropped} stale RX bytes")
+                ser.reset_input_buffer()
+
+            if not args.no_reset:
+                send_packet(ser, PKT_RESET_FAULT, seq=seq - 1)
+                drain_rx(ser, 0.2)
+                send_packet(
+                    ser,
+                    PKT_HEARTBEAT,
+                    seq=seq - 2,
+                    payload=struct.pack("<I", int(time.time() * 1000) & 0xFFFFFFFF),
+                )
+                drain_rx(ser, 0.1)
+
+            send_packet(ser, PKT_MOVE_SEGMENT, seq=seq, payload=payload)
+            print(
+                f"Sent PKT_MOVE_SEGMENT seq={seq}, "
+                f"steps=[{args.steps_a},{args.steps_b},{args.steps_c},{args.steps_d}], "
+                f"arr=[{args.arr_a},{args.arr_b},{args.arr_c},{args.arr_d}]"
+            )
+
+            rx_seq, done = wait_for_done(
+                ser, seq, timeout_s=args.timeout, verbose=args.verbose
+            )
+            print(f"OK: PKT_SEGMENT_DONE seq={rx_seq}, done_steps={list(done)}")
+            if not args.no_drain:
+                drain_rx(ser, 0.2)
+    except serial.SerialException as exc:
+        print(f"FAIL: serial error: {exc}", file=sys.stderr)
+        print("Is python -m pyrobot.launcher start still running?", file=sys.stderr)
+        raise SystemExit(1) from exc
+    except TimeoutError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
         print(
-            f"Sent PKT_MOVE_SEGMENT seq={args.seq}, "
-            f"steps=[{args.steps_a},{args.steps_b},{args.steps_c},{args.steps_d}], "
-            f"arr=[{args.arr_a},{args.arr_b},{args.arr_c},{args.arr_d}]"
+            "MCU may still be moving or stuck. Retry after reset, or send ESTOP.",
+            file=sys.stderr,
         )
-
-        deadline = time.time() + 35.0
-        while time.time() < deadline:
-            try:
-                frame = read_cobs_frame(ser, timeout=1.0)
-            except TimeoutError:
-                continue
-            except ValueError as exc:
-                # Partial/garbled frame may appear on USB CDC; keep waiting.
-                print(f"skip frame (decode): {exc}")
-                continue
-
-            try:
-                ptype, seq, payload_rx = parse_raw(frame)
-            except ValueError as exc:
-                print(f"skip frame (raw): {exc}")
-                continue
-            if ptype == PKT_TELEMETRY:
-                continue
-            if ptype == PKT_FAULT:
-                code = struct.unpack("<i", payload_rx[:4])[0] if len(payload_rx) >= 4 else 0
-                print(f"FAIL: PKT_FAULT seq={seq}, code={code}", file=sys.stderr)
-                raise SystemExit(1)
-            if ptype != PKT_SEGMENT_DONE:
-                continue
-            if seq != args.seq:
-                print(f"skip done with seq={seq}")
-                continue
-            done = struct.unpack("<iiii", payload_rx[:16]) if len(payload_rx) >= 16 else (0, 0, 0, 0)
-            print(f"OK: PKT_SEGMENT_DONE seq={seq}, done_steps={list(done)}")
-            return
-
-    print("FAIL: no PKT_SEGMENT_DONE", file=sys.stderr)
-    raise SystemExit(1)
+        raise SystemExit(1) from exc
+    except RuntimeError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":
     main()
-
